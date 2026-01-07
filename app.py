@@ -160,3 +160,52 @@ with tab2:
                 f"**{r['doc']} p.{r['page']}** (score {r['score']:.2f})"
             )
             st.write(r["text"])
+# --- 기존 매칭 결과가 'df_results'라는 데이터프레임에 있다고 가정할 때 ---
+
+st.divider() # 시각적 구분선
+st.header("🎯 수업 후: 복습 및 단권화 지원")
+
+# 1. 탭으로 기능 분류 (깔끔한 UI)
+tab1, tab2, tab3 = st.tabs(["📄 단권화 노트", "🧠 암기 카드(Anki)", "🤖 AI 퀴즈"])
+
+with tab1:
+    st.subheader("족보 주석 포함 PDF 생성")
+    st.write("강의록의 기출 구간에 족보 번호를 자동으로 입힌 PDF를 생성합니다.")
+    if st.button("단권화 PDF 다운로드 (준비 중)"):
+        # 여기에 PyMuPDF(fitz) 등을 활용한 PDF 편집 로직이 들어갑니다.
+        st.info("현재 개발 중인 기능입니다. 기출 위치가 표시된 레이어를 생성합니다.")
+
+with tab2:
+    st.subheader("Anki 카드 세트 추출")
+    st.write("오늘 매칭된 족보 문항을 기반으로 Anki(.csv) 파일을 만듭니다.")
+    
+    # 예시 데이터 생성 로직
+    if not df_results.empty:
+        anki_data = df_results[['lecture_keyword', 'exam_content']].rename(
+            columns={'lecture_keyword': 'Front', 'exam_content': 'Back'}
+        )
+        csv = anki_data.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="Anki용 CSV 다운로드",
+            data=csv,
+            file_name='medical_anki_cards.csv',
+            mime='text/csv',
+        )
+    else:
+        st.warning("매칭된 데이터가 없어 카드를 만들 수 없습니다.")
+
+with tab3:
+    st.subheader("AI 예측 변형 문제")
+    # GPT API가 연결되어 있다면 매칭된 내용을 프롬프트로 전달
+    if st.button("오늘의 핵심 퀴즈 생성"):
+        with st.spinner('AI가 족보 패턴을 분석 중...'):
+            # 가상의 결과 예시
+            st.success("분석 완료!")
+            st.markdown("""
+            **Q. 다음 중 오늘 배운 'A 기전'의 족보 빈출 오답 유형은?**
+            1. 증상과 약물을 반대로 매칭
+            2. 발병 시기를 2주에서 4주로 변경
+            3. 유전 형식을 우성에서 열성으로 변경
+            
+            *정답은 **3번**입니다. 작년 족보에서 이 부분이 함정으로 나왔습니다.*
+            """)
