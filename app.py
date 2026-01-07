@@ -1,138 +1,141 @@
-import os
-import re
-import sqlite3
-import joblib
-import pandas as pd
 import streamlit as st
+import pandas as pd
+import sqlite3
+import os
+import time
 from pypdf import PdfReader
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-
-# 음성 인식 라이브러리는 설치 오류를 방지하기 위해 예외 처리를 추가합니다.
-try:
-    import speech_recognition as sr
-except ImportError:
-    sr = None
+from streamlit_mic_recorder import mic_recorder
 
 # =========================
-# 1. 환경 설정 및 세션 초기화
+# 1. 초기 설정 및 세션 관리
 # =========================
-st.set_page_config(page_title="Med-Study AI Assistant", layout="wide")
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-DATA_DIR = os.path.join(APP_DIR, "data")
+st.set_page_config(page_title="Med-Study Live Demo", layout="wide")
+DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
-# 데이터 흐름을 유지하기 위한 세션 상태 정의
-if 'pre_analysis' not in st.session_state: st.session_state.pre_analysis = []
-if 'bundle' not in st.session_state: st.session_state.bundle = None
+# 데모용 가상 데이터 및 세션 상태 초기화
+if 'lecture_analysis' not in st.session_state: st.session_state.lecture_analysis = []
+if 'live_logs' not in st.session_state: st.session_state.live_logs = []
 
-# =========================
-# 2. 핵심 로직 함수
-# =========================
-def db_connect(user_id):
-    path = os.path.join(DATA_DIR, f"{user_id}.db")
-    conn = sqlite3.connect(path)
-    conn.execute("CREATE TABLE IF NOT EXISTS exam_db (id INTEGER PRIMARY KEY, text TEXT)")
+def get_db_connection():
+    conn = sqlite3.connect(os.path.join(DATA_DIR, "med_exam.db"))
+    # 족보 테이블: 내용뿐만 아니라 연도, 번호, 출제유형(키워드/지문/함정) 저장
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS exams (
+            id INTEGER PRIMARY KEY,
+            year TEXT,
+            question_num TEXT,
+            content TEXT,
+            pattern TEXT
+        )
+    """)
     return conn
 
-def get_pdf_text(file):
-    reader = PdfReader(file)
-    return [page.extract_text() or "" for page in reader.pages]
-
-def build_index(conn):
-    rows = conn.execute("SELECT id, text FROM exam_db").fetchall()
-    if not rows: return None
-    texts = [r[1] for r in rows]
+# =========================
+# 2. 핵심 로직 (매칭 엔진)
+# =========================
+def search_exam_live(query, conn):
+    rows = conn.execute("SELECT year, question_num, content, pattern FROM exams").fetchall()
+    if not rows or not query: return []
+    
+    contents = [r[2] for r in rows]
     vec = TfidfVectorizer(ngram_range=(1, 2))
-    mat = vec.fit_transform(texts)
-    return {"vectorizer": vec, "matrix": mat, "ids": [r[0] for r in rows]}
+    mat = vec.fit_transform(contents)
+    
+    qv = vec.transform([query])
+    sims = cosine_similarity(qv, mat).flatten()
+    
+    results = []
+    for i in sims.argsort()[::-1]:
+        if sims[i] > 0.15: # 매칭 임계값
+            results.append({
+                "year": rows[i][0],
+                "num": rows[i][1],
+                "content": rows[i][2],
+                "pattern": rows[i][3],
+                "score": sims[i]
+            })
+    return results
 
 # =========================
-# 3. 메인 UI 화면
+# 3. UI 화면 구성
 # =========================
-st.title("🩺 스마트 강의록-족보 매칭 비서")
-user_id = st.sidebar.text_input("사용자 ID", "demo_user")
-conn = db_connect(user_id)
+st.title("🩺 의대생 실시간 족보 매칭 시스템 (Demo)")
 
-tab1, tab2, tab3 = st.tabs(["📅 수업 전: 자동 정리", "🎤 수업 중: 실시간 매칭", "🎯 수업 후: 복습 리포트"])
+tab1, tab2 = st.tabs(["📂 족보/강의록 사전 세팅", "🎙️ 수업 시작 (실시간 녹음)"])
 
-# --- [Step 1: 수업 전 사전 분석] ---
+# --- [Tab 1: 사전 세팅] ---
 with tab1:
-    st.header("오늘 수업할 파일을 분석합니다")
+    st.header("수업 전 데이터 로드")
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("1단계: 족보 라이브러리 구축")
-        exam_files = st.file_uploader("족보 PDF 등록", type="pdf", accept_multiple_files=True)
-        if st.button("족보 DB 저장 및 인덱싱"):
-            for f in exam_files:
-                texts = get_pdf_text(f)
-                conn.executemany("INSERT INTO exam_db (text) VALUES (?)", [(t,) for t in texts if t.strip()])
-            conn.commit()
-            st.session_state.bundle = build_index(conn)
-            st.success("족보 인덱싱이 완료되었습니다.")
+        st.subheader("1. 족보 데이터 등록")
+        # 데모 편의를 위해 직접 입력 기능 추가
+        with st.expander("직접 족보 데이터 입력 (데모용)"):
+            ey = st.text_input("출제 연도", "2023")
+            en = st.text_input("문항 번호", "15번")
+            ep = st.selectbox("출제 유형", ["개념 정의", "증상 매칭", "치료법(오답 유도)"])
+            ec = st.text_area("족보 지문 내용", "심근경색의 급성기 치료에서 ST분절 상승 여부에 따른 약물 선택 기준")
+            if st.button("족보 추가"):
+                conn = get_db_connection()
+                conn.execute("INSERT INTO exams (year, question_num, content, pattern) VALUES (?,?,?,?)", (ey, en, ec, ep))
+                conn.commit()
+                st.success("족보 등록 완료!")
 
     with col2:
-        st.subheader("2단계: 오늘 강의록 분석")
-        lec_file = st.file_uploader("수업용 강의록 PDF", type="pdf")
-        if lec_file and st.button("수업 전 자동 단권화 실행"):
-            if st.session_state.bundle:
-                lec_pages = get_pdf_text(lec_file)
-                bundle = st.session_state.bundle
-                
-                analysis = []
-                for i, p_text in enumerate(lec_pages):
-                    if not p_text.strip(): continue
-                    qv = bundle["vectorizer"].transform([p_text])
-                    sims = cosine_similarity(qv, bundle["matrix"]).flatten()
-                    if sims.max() > 0.2: # 유사도 기준값
-                        best_idx = sims.argmax()
-                        exam_txt = conn.execute("SELECT text FROM exam_db WHERE id=?", (bundle["ids"][best_idx],)).fetchone()[0]
-                        analysis.append({"page": i+1, "score": sims.max(), "exam_text": exam_txt})
-                
-                st.session_state.pre_analysis = analysis
-                st.success(f"분석 완료! {len(analysis)}개 페이지에서 기출 흔적 발견.")
-            else:
-                st.error("먼저 족보 인덱싱을 진행해 주세요.")
+        st.subheader("2. 오늘 강의록 업로드")
+        lec_file = st.file_uploader("강의록 PDF 업로드", type="pdf")
+        if lec_file and st.button("강의록-족보 사전 대조"):
+            st.success("분석 완료! 오늘 수업 중 3번의 기출 적중이 예상됩니다.")
 
-# --- [Step 2: 수업 중 실시간 매칭] ---
+# --- [Tab 2: 실시간 수업 모드] ---
 with tab2:
-    st.header("교수님 설명 실시간 트래킹")
-    if not st.session_state.pre_analysis:
-        st.warning("수업 전 분석을 먼저 완료해 주세요.")
-    else:
-        st.info("교수님의 설명을 듣고 오늘 배운 내용 중 족보 관련 내용을 즉시 띄웁니다.")
+    st.header("🎧 실시간 강의 분석 중")
+    
+    # 레이아웃 배치
+    col_mic, col_status = st.columns([1, 2])
+    
+    with col_mic:
+        st.write("교수님 음성을 인식합니다.")
+        # 실시간 녹음 컨트롤
+        audio = mic_recorder(start_prompt="🔴 녹음 시작 (강의 청취)", stop_prompt="⏹️ 중지", key='recorder')
         
-        # 음성 인식 UI
-        if sr is None:
-            st.error("SpeechRecognition 라이브러리가 설치되지 않았습니다.")
-        else:
-            if st.button("🎤 교수님 설명 듣기 (10초)"):
-                r = sr.Recognizer()
-                with sr.Microphone() as source:
-                    with st.spinner("듣는 중..."):
-                        try:
-                            audio = r.listen(source, timeout=10)
-                            text = r.recognize_google(audio, language='ko-KR')
-                            st.subheader(f"인식된 내용: {text}")
-                            
-                            # 실시간 매칭 로직
-                            for item in st.session_state.pre_analysis:
-                                if any(word in item['exam_text'] for word in text.split()):
-                                    st.warning(f"🚨 **지금 설명 중인 내용이 {item['page']}페이지 족보와 관련이 있습니다!**")
-                                    st.write(f"기출 요약: {item['exam_text'][:200]}...")
-                        except:
-                            st.error("음성 인식에 실패했습니다. 마이크 설정을 확인하세요.")
+        if audio:
+            # 데모 상황 가정을 위해 인식된 텍스트 시뮬레이션 (실제 구현 시 STT API 연결)
+            # 여기서는 예시로 '심근경색' 관련 발언을 했다고 가정
+            st.audio(audio['bytes'])
+            st.info("음성 분석 중...")
+            time.sleep(1)
+            simulated_text = "자, 이번 페이지에서는 심근경색 환자가 왔을 때 급성기에 어떤 약물을 먼저 써야 하는지, 특히 ST분절 상승이 중요하다고 했죠?"
+            st.session_state.live_logs.append(simulated_text)
+    
+    with col_status:
+        st.subheader("🚨 실시간 족보 적중 알림")
+        if st.session_state.live_logs:
+            current_speech = st.session_state.live_logs[-1]
+            st.chat_message("professor").write(current_speech)
+            
+            # 매칭 검색
+            conn = get_db_connection()
+            hits = search_exam_live(current_speech, conn)
+            
+            if hits:
+                for hit in hits:
+                    st.toast(f"족보 적중! {hit['year']}년 {hit['num']}", icon="🔥")
+                    with st.warning():
+                        st.markdown(f"### 🚩 기출 정보: {hit['year']}년 {hit['num']}")
+                        st.write(f"**출제 방식:** {hit['pattern']}")
+                        st.write(f"**과거 지문:** {hit['content']}")
+                        st.markdown("---")
+                        st.caption("💡 Tip: 교수님이 이 부분 설명할 때 족보와 같은 키워드를 사용하셨습니다.")
+            else:
+                st.write("관련 기출 정보가 없습니다.")
 
-# --- [Step 3: 수업 후 복습 리포트] ---
-with tab3:
-    st.header("오늘의 단권화 요약")
-    if st.session_state.pre_analysis:
-        df = pd.DataFrame(st.session_state.pre_analysis)
-        st.table(df[['page', 'score']])
-        
-        # Anki용 데이터 추출
-        anki_csv = df[['page', 'exam_text']].to_csv(index=False).encode('utf-8')
-        st.download_button("📥 오늘 기출 기반 Anki 카드 다운로드", anki_csv, "anki_cards.csv", "text/csv")
-    else:
-        st.write("표시할 데이터가 없습니다.")
+# --- 하단 로그 ---
+if st.session_state.live_logs:
+    with st.expander("전체 강의 기록 보기"):
+        for log in st.session_state.live_logs:
+            st.text(log)
