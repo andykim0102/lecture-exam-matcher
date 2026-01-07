@@ -94,4 +94,28 @@ with tab2:
     
     col_ctrl, col_view = st.columns([1, 2])
     
-    with col_
+    with col_ctrl:
+        if st.button("🎤 수업 시작 (음성 인식)"):
+            r = sr.Recognizer()
+            with sr.Microphone() as source:
+                st.write("교수님 음성 청취 중...")
+                try:
+                    audio = r.listen(source, timeout=5, phrase_time_limit=10)
+                    text = r.recognize_google(audio, language='ko-KR')
+                    st.session_state.live_text = text
+                    st.success(f"인식된 내용: {text}")
+                except:
+                    st.error("음성이 들리지 않거나 인식에 실패했습니다.")
+
+    with col_view:
+        if 'live_text' in st.session_state:
+            st.subheader("🚨 실시간 매칭 알림")
+            # 사전 분석된 결과 중에서 실시간 음성 키워드와 매칭되는 페이지 탐색
+            matched = [res for res in st.session_state.pre_analysis if any(word in res['exam_text'] for word in st.session_state.live_text.split())]
+            
+            if matched:
+                for m in matched:
+                    st.warning(f"**지금 설명하시는 내용이 강의록 {m['page']}p 족보와 관련이 있습니다!**")
+                    st.write(f"기출 내용 재확인: {m['exam_text'][:150]}...")
+            else:
+                st.write("실시간 일치 문항 없음")
