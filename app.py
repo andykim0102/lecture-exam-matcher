@@ -209,3 +209,61 @@ with tab3:
             
             *정답은 **3번**입니다. 작년 족보에서 이 부분이 함정으로 나왔습니다.*
             """)
+import streamlit as st
+import pandas as pd
+# PDF 생성 및 이미지 처리를 위한 라이브러리 (필요 시 설치: pip install fpdf)
+from fpdf import FPDF 
+
+# --- [차별점 1] 족보 매칭 기반 우선순위 및 인사이트 ---
+st.divider()
+st.header("🚀 의대생 맞춤형 Post-Class 엔진")
+
+# 가상의 매칭 데이터(df_results)가 있다고 가정
+if not df_results.empty:
+    # 기출 횟수에 따른 우선순위 계산 로직 추가
+    df_results['priority_score'] = df_results['match_count'] * 10  # 예시 로직
+    
+    st.subheader("📍 오늘 강의의 핵심 '족보' 포인트")
+    top_picks = df_results.nlargest(3, 'priority_score')
+    for i, row in top_picks.iterrows():
+        st.error(f"**중요!** '{row['lecture_keyword']}' 관련 내용은 최근 5년간 {row['match_count']}회 출제되었습니다.")
+
+    # --- [차별점 2] 드래그 & 드롭 대용: AI 노트 정리 (아이디어 3번 반영) ---
+    st.subheader("📝 AI 스마트 노트 생성")
+    with st.expander("강의록과 족보를 합친 '단권화 초안' 보기"):
+        st.write("AI가 매칭된 데이터를 바탕으로 요약 노트를 생성했습니다.")
+        summary_text = ""
+        for i, row in df_results.iterrows():
+            summary_text += f"- **{row['lecture_keyword']}**: {row['exam_content']} (기출: {row['year']}년)\n"
+        st.info(summary_text)
+        
+        # 노트 저장 기능
+        st.download_button("나만의 요약 노트(.txt) 저장", summary_text)
+
+    # --- [차별점 3] 기억법 서비스: 암기 스토리텔링 (아이디어 4번 반영) ---
+    st.subheader("🧠 암기 최적화: 기억의 궁전 & Mnemonics")
+    selected_topic = st.selectbox("어떤 개념이 안 외워지나요?", df_results['lecture_keyword'].unique())
+    
+    if st.button(f"'{selected_topic}' 암기법 생성"):
+        with st.spinner('암기 스토리를 만드는 중...'):
+            # 실제 서비스 시 GPT API 연동 구간
+            st.success("생성 완료! 아래 시나리오로 외워보세요.")
+            st.markdown(f"""
+            > **Mnemonic Scenario:** > "{selected_topic}"을 외우기 위해 **[기억의 궁전]** 거실에 있는 소파를 떠올려보세요. 
+            > 소파 위에 {df_results[df_results['lecture_keyword']==selected_topic]['exam_content'].values[0]}가 
+            > 거대하게 놓여있다고 상상하며 연결하는 겁니다!
+            """)
+
+    # --- [차별점 4] Anki 연동 (실행 성능 향상) ---
+    st.subheader("📥 외부 앱 연동")
+    col1, col2 = st.columns(2)
+    with col1:
+        # CSV 포맷으로 Anki 카드 생성
+        anki_csv = df_results[['lecture_keyword', 'exam_content']].to_csv(index=False).encode('utf-8')
+        st.download_button("Anki 카드 세트(.csv) 다운로드", anki_csv, "anki_cards.csv", "text/csv")
+    with col2:
+        if st.button("iPad 굿노트용 PDF 내보내기"):
+            st.write("매칭 주석이 포함된 PDF를 생성 중입니다...")
+
+else:
+    st.warning("먼저 강의록과 족보 파일을 업로드하여 매칭을 진행해 주세요.")
