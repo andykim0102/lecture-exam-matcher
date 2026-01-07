@@ -141,15 +141,37 @@ with tab2:
             else:
                 st.info("이 페이지와 관련된 기출 내역이 없습니다.")
 
-# --- [Tab 3: 수업 후 복습 리포트] ---
+# --- [Tab 3: 복습 리포트 개선 코드] ---
 with tab3:
     st.header("🎯 오늘의 스마트 단권화 리포트")
+    
     if st.session_state.pre_analysis:
+        # 데이터프레임 가공
         df = pd.DataFrame(st.session_state.pre_analysis)
-        st.subheader("매칭 결과 요약")
-        st.dataframe(df[['page', 'exam_info', 'score']])
         
-        # Anki 카드 생성 기능
+        # 1. 소수점 점수를 백분율로 변환
+        df['일치도'] = (df['score'] * 100).round(1).astype(str) + '%'
+        
+        # 2. 점수에 따른 중요도 등급 부여 함수
+        def get_importance(score):
+            if score >= 0.35: return "🔥 매우 높음 (필암기)"
+            elif score >= 0.25: return "✅ 보통 (빈출)"
+            else: return "⚠️ 참고 (유사성 낮음)"
+            
+        df['중요도'] = df['score'].apply(get_importance)
+        
+        # 3. 사용자에게 보여줄 열만 선택 및 이름 변경
+        display_df = df[['page', '중요도', '일치도', 'exam_info']].rename(columns={
+            'page': '강의록 페이지',
+            'exam_info': '관련 족보 출처'
+        })
+        
+        st.subheader("📋 기출 적중 분석 요약")
+        
+        # 4. 보기 좋게 스타일링된 표 출력
+        st.table(display_df) 
+        
+        # Anki 카드 생성 기능 유지
         csv = df.to_csv(index=False).encode('utf-8')
         st.download_button("📥 오늘 기출 기반 Anki 카드 다운로드", csv, "anki_cards.csv", "text/csv")
     else:
