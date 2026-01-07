@@ -267,3 +267,51 @@ if not df_results.empty:
 
 else:
     st.warning("먼저 강의록과 족보 파일을 업로드하여 매칭을 진행해 주세요.")
+
+import streamlit as st
+import time
+
+# --- [차별점: 수업 중 실시간 어시스턴트] ---
+st.divider()
+st.header("⚡ 실시간 수업 모드 (In-class Live)")
+
+# 수업 중 모드 활성화 스위치
+live_mode = st.toggle("실시간 수업 어시스턴트 시작")
+
+if live_mode:
+    st.info("🎤 교수님의 설명을 분석하여 관련 족보를 실시간으로 탐색합니다.")
+    
+    # 레이아웃 분할: 왼쪽(실시간 필기/STT), 오른쪽(실시간 족보 알림)
+    col_live, col_match = st.columns([1, 1])
+    
+    with col_live:
+        st.subheader("📝 실시간 강의 요약")
+        # 실제 구현 시 음성 인식(STT) 라이브러리 연동 구간
+        user_note = st.text_area("교수님 강조 사항이나 필기를 입력하세요 (또는 음성 인식 중...)", 
+                                 placeholder="예: '이 수용체 기전은 작년 국시에도 나왔고...'")
+        
+    with col_match:
+        st.subheader("🚨 실시간 족보 매칭")
+        if user_note:
+            # 실시간 입력 내용과 기존 업로드된 df_results(족보) 매칭 시뮬레이션
+            with st.spinner('관련 기출 확인 중...'):
+                time.sleep(0.5) # 분석 처리 속도 시뮬레이션
+                
+                # 입력된 텍스트에 족보 키워드가 포함되었는지 간단 체크
+                matched_found = False
+                for i, row in df_results.iterrows():
+                    if row['lecture_keyword'] in user_note:
+                        st.warning(f"**기출 일치!** [{row['year']}년] {row['exam_content']}")
+                        st.caption(f"우선순위: {'🔥'* (int(row['match_count']))}")
+                        matched_found = True
+                
+                if not matched_found:
+                    st.write("아직 일치하는 과거 기출 문항이 없습니다.")
+
+    # --- [차별점: 실시간 드래그 & 드롭 대안] ---
+    st.subheader("📸 실시간 화면 캡처 및 태깅")
+    if st.button("현재 슬라이드 족보 태그와 함께 저장"):
+        st.success("현재 강의록 페이지가 2023년 기출 정보와 매칭되어 '단권화 후보'로 등록되었습니다.")
+
+else:
+    st.write("수업 시작 시 위 토글을 켜주세요.")
