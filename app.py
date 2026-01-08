@@ -9,34 +9,17 @@ import time
 # ==========================================
 # 1. 설정 및 초기화
 # ==========================================
-st.set_page_config(page_title="Med-Study OS Fixed", layout="wide", page_icon="🩺")
+st.set_page_config(page_title="Med-Study OS Final", layout="wide", page_icon="🩺")
 
-# 세션 상태 초기화 (새로고침 해도 데이터 유지)
-if 'db' not in st.session_state: 
-    st.session_state.db = []
-if 'lecture_doc' not in st.session_state: 
-    st.session_state.lecture_doc = None
-if 'current_page' not in st.session_state: 
-    st.session_state.current_page = 0
-    # ==========================================
+if 'db' not in st.session_state: st.session_state.db = []
+if 'lecture_doc' not in st.session_state: st.session_state.lecture_doc = None
+if 'current_page' not in st.session_state: st.session_state.current_page = 0
+
+# ==========================================
 # 2. 핵심 함수 (Logic)
 # ==========================================
-
-def get_best_model():
-    """사용 가능한 Gemini 모델 자동 탐색"""
-    try:
-        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        # 1순위: Flash (빠름), 2순위: Pro (성능)
-        for m in models:
-            if 'flash' in m.lower(): return m
-        for m in models:
-            if 'pro' in m.lower(): return m
-        return models[0] if models else None
-    except Exception:
-        return None
-
 def extract_text_from_pdf(file):
-    """PDF를 텍스트로 변환"""
+    """PDF를 텍스트로 변환 (fitz 사용)"""
     doc = fitz.open(stream=file.read(), filetype="pdf")
     pages_content = []
     for page_num, page in enumerate(doc):
@@ -46,7 +29,7 @@ def extract_text_from_pdf(file):
     return pages_content
 
 def get_embedding(text):
-    """임베딩 (Embedding-004 우선 사용)"""
+    """임베딩 (Embedding-004 사용)"""
     try:
         return genai.embed_content(
             model="models/text-embedding-004",
@@ -55,7 +38,6 @@ def get_embedding(text):
         )['embedding']
     except Exception:
         try:
-            # 실패 시 구형 모델 시도
             return genai.embed_content(
                 model="models/embedding-001",
                 content=text,
@@ -75,19 +57,16 @@ def find_relevant_jokbo(query_text, db, top_k=3):
     top_idxs = np.argsort(sims)[::-1][:top_k]
     
     return [{"score": sims[i], "content": db[i]} for i in top_idxs]
-    # ==========================================
-# 3. 사이드바 & 메인 UI
+
+# ==========================================
+# 3. 사이드바
 # ==========================================
 with st.sidebar:
     st.title("⚙️ 설정")
     api_key = st.text_input("Gemini API Key", type="password")
     if api_key:
         genai.configure(api_key=api_key)
-        model_name = get_best_model()
-        if model_name:
-            st.success(f"연결됨: {model_name.split('/')[-1]}")
-        else:
-            st.error("API Key 확인 필요")
+        st.success("API Key 입력됨")
             
     st.divider()
     st.write(f"📚 학습된 족보: {len(st.session_state.db)} 페이지")
@@ -95,6 +74,9 @@ with st.sidebar:
         st.session_state.db = []
         st.rerun()
 
+# ==========================================
+# 4. 메인 UI
+# ==========================================
 tab1, tab2 = st.tabs(["📂 족보 학습", "📖 강의 공부"])
 
 # --- TAB 1: 족보 학습 ---
@@ -107,10 +89,8 @@ with tab1:
             st.error("API Key를 입력하세요.")
         else:
             bar = st.progress(0)
-            status = st.empty() # 상태 메시지용
+            status = st.empty()
             new_db = []
-            
-            # 전체 작업량 계산 (프로그레스 바용)
             total_files = len(files)
             
             for i, f in enumerate(files):
@@ -118,24 +98,21 @@ with tab1:
                 pages = extract_text_from_pdf(f)
                 
                 for j, p in enumerate(pages):
-                    # 상세 진행상황 표시
                     status.text(f"🧠 학습 중: {f.name} ({j+1}/{len(pages)} 페이지)...")
-                    
                     emb = get_embedding(p['text'])
                     if emb:
                         p['embedding'] = emb
                         new_db.append(p)
-                    
-                    # [핵심 수정] 과부하 방지를 위해 2초 대기
-                    time.sleep(2.0) 
+                    # [중요] 속도 제한 방지 대기
+                    time.sleep(1.0) 
                 
                 bar.progress((i + 1) / total_files)
             
             st.session_state.db.extend(new_db)
-            status.text("✅ 모든 학습이 완료되었습니다!")
-            st.success(f"총 {len(new_db)} 페이지 학습 완료!")
+            status.text("✅ 학습 완료!")
+            st.success(f"{len(new_db)} 페이지 학습 완료!")
 
-# --- TAB 2: 강의 분석 (안정성 강화 버전) ---
+# --- TAB 2: 강의 분석 ---
 with tab2:
     st.header("2. 강의 뷰어 & AI")
     lec_file = st.file_uploader("강의록 PDF", type="pdf", key="lec")
@@ -167,67 +144,24 @@ with tab2:
                     st.error("API Key 또는 족보 데이터가 없습니다.")
                 else:
                     if not curr_text.strip():
-                        st.warning("이 페이지에는 텍스트가 거의 없습니다. (이미지 위주)")
+                        st.warning("텍스트가 없는 페이지입니다.")
                     else:
-                        with st.spinner("분석 중... (최대 30초 소요)"):
+                        with st.spinner("AI가 분석 중입니다..."):
                             try:
                                 # 1. 관련 족보 찾기
                                 related = find_relevant_jokbo(curr_text, st.session_state.db)
+                                ctx_str = "\n".join([f"- {i['content']['text'][:100]}" for i in related])
                                 
-                                ctx_list = []
-                                for item in related:
-                                    info = f"- {item['content']['source']} ({item['score']:.2f}): {item['content']['text'][:100]}..."
-                                    ctx_list.append(info)
-                                ctx_str = "\n".join(ctx_list)
-                                
-                                prompt_text = "당신은 의대생 튜터입니다.\n"
-                                prompt_text += f"[현재 강의]: {curr_text}\n"
-                                prompt_text += f"[관련 족보]: {ctx_str}\n\n"
-                                prompt_text += "요청:\n1. 강의와 족보의 연관성 요약\n2. 핵심 키워드 3개\n3. 예상 객관식 문제 1개"
+                                prompt = f"강의: {curr_text}\n족보: {ctx_str}\n\n연관성, 키워드, 문제 생성해줘."
 
-                                # [수정됨] 2. 모델 강제 지정 및 재시도 로직 강화
-                                # gemini-2.5-flash 대신 안정적인 1.5-flash를 명시적으로 찾습니다.
-                                target_model = "gemini-1.5-flash"
+                                # [핵심] 무료 한도가 넉넉한 1.5-flash 모델 강제 사용
+                                model = genai.GenerativeModel("gemini-1.5-flash")
                                 
-                                # 만약 1.5-flash가 목록에 없으면 기존 자동 탐색 사용
-                                all_models = [m.name for m in genai.list_models()]
-                                found_exact_model = False
-                                for m in all_models:
-                                    if "gemini-1.5-flash" in m:
-                                        target_model = m
-                                        found_exact_model = True
-                                        break
-                                
-                                if not found_exact_model:
-                                    target_model = get_best_model() # 없으면 자동 선택
-
-                                model = genai.GenerativeModel(target_model)
-                                
-                                response_text = ""
-                                max_retries = 3
-                                
-                                for attempt in range(max_retries):
-                                    try:
-                                        res = model.generate_content(prompt_text)
-                                        response_text = res.text
-                                        break 
-                                    except Exception as e:
-                                        if "429" in str(e): # 429 에러 발생 시
-                                            if attempt < max_retries - 1:
-                                                # 대기 시간을 20초로 대폭 늘림 (확실한 해결)
-                                                wait_time = 20
-                                                st.toast(f"사용량이 많아 {wait_time}초 대기 후 재시도합니다... ({attempt+1}/{max_retries})")
-                                                time.sleep(wait_time)
-                                                continue
-                                            else:
-                                                st.error("지금 구글 AI 서버가 붐빕니다. 1분 뒤에 다시 시도해주세요.")
-                                        else:
-                                            st.error(f"Error: {e}")
-                                            break
-
-                                if response_text:
-                                    st.success(f"분석 완료! (Model: {target_model})")
-                                    st.markdown(response_text)
+                                response = model.generate_content(prompt)
+                                st.markdown(response.text)
                                     
                             except Exception as e:
-                                st.error(f"Error: {e}")
+                                if "429" in str(e):
+                                    st.error("⚠️ 사용량이 많습니다. 30초 뒤에 다시 시도해주세요.")
+                                else:
+                                    st.error(f"에러 발생: {e}")
