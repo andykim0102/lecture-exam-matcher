@@ -4,24 +4,43 @@ import fitz  # PyMuPDF
 from PIL import Image
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
-import io
 
 # ==========================================
-# 1. 설정 및 초기화 (Configuration)
+# 1. 설정 및 초기화
 # ==========================================
-st.set_page_config(page_title="Med-Study OS Base", layout="wide", page_icon="🧬")
+st.set_page_config(page_title="Med-Study OS Fixed", layout="wide", page_icon="🧬")
 
-# 세션 상태 초기화
+# 세션 상태 초기화 (새로고침 해도 데이터 유지)
 if 'db' not in st.session_state: st.session_state.db = []  # 족보 데이터 저장소
 if 'lecture_doc' not in st.session_state: st.session_state.lecture_doc = None
 if 'current_page' not in st.session_state: st.session_state.current_page = 0
 
 # ==========================================
-# 2. 핵심 함수 (Core Logic)
+# 2. 핵심 함수 (Logic)
 # ==========================================
 
+def get_best_model():
+    """
+    현재 API Key로 사용 가능한 모델 중 가장 적합한 모델을 자동으로 찾습니다.
+    (NotFound Error 방지용)
+    """
+    try:
+        # 생성(generateContent)이 가능한 모델 목록 조회
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        
+        # 1순위: Flash (빠름), 2순위: Pro (똑똑함), 3순위: 아무거나
+        for m in models:
+            if 'flash' in m.lower(): return m
+        for m in models:
+            if 'pro' in m.lower(): return m
+        
+        return models[0] if models else None
+    except Exception as e:
+        st.error(f"모델 목록 조회 실패: {e}")
+        return None
+
 def extract_text_from_pdf(file):
-    """PDF 파일을 페이지별 텍스트로 분리하여 리스트로 반환"""
+    """PDF를 페이지별 텍스트로 변환"""
     doc = fitz.open(stream=file.read(), filetype="pdf")
     pages_content = []
     for page_num, page in enumerate(doc):
@@ -35,34 +54,40 @@ def extract_text_from_pdf(file):
     return pages_content
 
 def get_embedding(text):
-    """Gemini API를 사용하여 텍스트를 벡터로 변환"""
+    """텍스트를 벡터로 변환 (최신 모델 사용)"""
     try:
-        # 최신 임베딩 모델 사용 (text-embedding-004 권장)
         result = genai.embed_content(
             model="models/text-embedding-004",
             content=text,
             task_type="retrieval_document"
         )
         return result['embedding']
-    except Exception as e:
-        st.error(f"임베딩 실패: {e}")
-        return []
+    except Exception:
+        # 구형 모델 폴백(Fallback)
+        try:
+            result = genai.embed_content(
+                model="models/embedding-001",
+                content=text,
+                task_type="retrieval_document"
+            )
+            return result['embedding']
+        except Exception as e:
+            st.error(f"임베딩 오류: {e}")
+            return []
 
 def find_relevant_jokbo(query_text, db, top_k=3):
-    """강의 내용(Query)과 족보(DB) 간의 코사인 유사도 계산"""
+    """현재 강의 내용과 가장 유사한 족보 내용 검색"""
     if not db: return []
     
-    # 1. 쿼리 임베딩
     query_embedding = get_embedding(query_text)
     if not query_embedding: return []
 
-    # 2. DB 임베딩 매트릭스 생성
     db_embeddings = [item['embedding'] for item in db]
     
-    # 3. 코사인 유사도 계산
+    # 코사인 유사도 계산
     similarities = cosine_similarity([query_embedding], db_embeddings)[0]
     
-    # 4. 상위 K개 추출
+    # 상위 K개 추출
     top_indices = np.argsort(similarities)[::-1][:top_k]
     
     results = []
@@ -82,44 +107,52 @@ with st.sidebar:
     
     if api_key:
         genai.configure(api_key=api_key)
-        st.success("API 연결됨")
-    else:
-        st.warning("API Key를 입력해주세요.")
         
+        # 연결 테스트 및 모델 확인
+        try:
+            model_name = get_best_model()
+            if model_name:
+                st.success(f"✅ 연결 성공! \n사용 모델: {model_name.split('/')[-1]}")
+            else:
+                st.error("❌ 사용 가능한 모델이 없습니다.")
+        except:
+            st.error("⚠️ API Key가 올바르지 않습니다.")
+    
     st.divider()
-    st.write(f"📊 학습된 족보 데이터: {len(st.session_state.db)} 청크")
+    st.write(f"📊 학습된 족보 데이터: {len(st.session_state.db)} 페이지")
+    if st.button("데이터 초기화"):
+        st.session_state.db = []
+        st.experimental_rerun()
 
 # ==========================================
-# 4. 메인 UI (Tabs)
+# 4. 메인 UI
 # ==========================================
 tab1, tab2 = st.tabs(["📂 1. 족보 학습 (Knowledge Base)", "📖 2. 강의 학습 (Study Mode)"])
 
 # --- TAB 1: 족보 데이터 구축 ---
 with tab1:
-    st.subheader("과거 기출문제(족보) 업로드")
-    st.info("이곳에 업로드된 PDF는 AI가 검색할 수 있는 '지식 베이스'가 됩니다.")
+    st.header("1. 족보(기출문제) 업로드")
+    st.caption("AI가 참고할 '지식 베이스'를 만드는 단계입니다.")
     
-    uploaded_jokbo = st.file_uploader("족보 PDF 파일들", accept_multiple_files=True, type="pdf")
+    uploaded_jokbo = st.file_uploader("족보 PDF 파일들을 드래그하세요", accept_multiple_files=True, type="pdf")
     
-    if st.button("데이터베이스 구축 시작 🚀"):
+    if st.button("족보 학습 시작 🚀"):
         if not api_key:
-            st.error("먼저 API 키를 입력하세요.")
+            st.warning("왼쪽 사이드바에서 API Key를 먼저 입력해주세요.")
         elif not uploaded_jokbo:
-            st.error("파일을 업로드하세요.")
+            st.warning("파일을 업로드해주세요.")
         else:
             progress_bar = st.progress(0)
-            status_text = st.empty()
+            status = st.empty()
             
             new_db = []
             total_files = len(uploaded_jokbo)
             
             for idx, file in enumerate(uploaded_jokbo):
-                status_text.text(f"처리 중: {file.name}...")
-                
-                # 1. 텍스트 추출
+                status.text(f"📖 Reading: {file.name}...")
                 pages = extract_text_from_pdf(file)
                 
-                # 2. 임베딩 (페이지별로 벡터화)
+                status.text(f"🧠 Embedding: {file.name} ({len(pages)} pages)...")
                 for p in pages:
                     emb = get_embedding(p['text'])
                     if emb:
@@ -128,85 +161,82 @@ with tab1:
                 
                 progress_bar.progress((idx + 1) / total_files)
             
-            # 세션에 저장
             st.session_state.db.extend(new_db)
-            status_text.text("완료!")
-            st.success(f"총 {len(new_db)}개의 페이지가 학습되었습니다.")
+            status.text("✅ 학습 완료!")
+            st.success(f"총 {len(new_db)} 페이지가 지식 베이스에 추가되었습니다.")
 
 # --- TAB 2: 강의 뷰어 및 분석 ---
 with tab2:
-    st.subheader("강의록 뷰어 & AI 분석")
+    st.header("2. 강의록 뷰어 & AI 튜터")
     
     lecture_file = st.file_uploader("오늘 공부할 강의록 PDF", type="pdf", key="lecture")
     
     if lecture_file:
-        # 파일을 PyMuPDF 객체로 로드
+        # 파일 로드 (세션 최적화)
         if st.session_state.lecture_doc is None or st.session_state.lecture_doc.name != lecture_file.name:
             st.session_state.lecture_doc = fitz.open(stream=lecture_file.read(), filetype="pdf")
-            st.session_state.current_page = 0 # 페이지 초기화
+            st.session_state.current_page = 0
             
         doc = st.session_state.lecture_doc
         total_pages = len(doc)
         
-        # 2-Column 레이아웃 (좌: PDF 뷰어, 우: AI 분석)
-        col_view, col_ai = st.columns([1, 1])
+        # 화면 분할 (좌: 뷰어, 우: AI)
+        col_view, col_ai = st.columns([6, 4])
         
         with col_view:
-            # 페이지 컨트롤러
+            st.markdown("#### 📄 PDF Viewer")
+            # 페이지 컨트롤
             c1, c2, c3 = st.columns([1, 2, 1])
             if c1.button("◀ 이전"):
                 if st.session_state.current_page > 0: st.session_state.current_page -= 1
-            c2.markdown(f"<center>{st.session_state.current_page + 1} / {total_pages} 페이지</center>", unsafe_allow_html=True)
+            c2.markdown(f"<div style='text-align: center;'>Page {st.session_state.current_page + 1} / {total_pages}</div>", unsafe_allow_html=True)
             if c3.button("다음 ▶"):
                 if st.session_state.current_page < total_pages - 1: st.session_state.current_page += 1
             
-            # 현재 페이지 이미지 렌더링
+            # PDF 렌더링
             page = doc.load_page(st.session_state.current_page)
             pix = page.get_pixmap(dpi=150)
             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
             st.image(img, use_container_width=True)
             
-            # 현재 페이지 텍스트 추출 (분석용)
             current_text = page.get_text()
 
         with col_ai:
-            st.markdown("### 🤖 AI 연관 분석")
+            st.markdown("#### 🤖 AI Analysis")
             
-            if st.button("이 페이지 분석하기 ⚡"):
-                if len(st.session_state.db) == 0:
-                    st.warning("먼저 '족보 학습' 탭에서 데이터를 구축해주세요.")
+            if st.button("이 페이지 분석하기 ⚡", type="primary"):
+                if not api_key:
+                    st.error("API Key가 필요합니다.")
+                elif len(st.session_state.db) == 0:
+                    st.error("경고: 학습된 족보 데이터가 없습니다. (Tab 1에서 학습 필요)")
                 elif not current_text.strip():
-                    st.warning("이 페이지에는 텍스트가 거의 없습니다. (이미지 위주)")
+                    st.warning("텍스트를 인식할 수 없는 페이지입니다. (이미지 위주)")
                 else:
                     with st.spinner("족보와 연결고리를 찾는 중..."):
-                        # 1. 유사한 족보 검색
-                        related_items = find_relevant_jokbo(current_text, st.session_state.db)
-                        
-                        # 2. 프롬프트 구성
-                        context_str = ""
-                        for item in related_items:
-                            context_str += f"- [출처: {item['content']['source']} {item['content']['page']}p] (유사도: {item['score']:.2f})\n내용: {item['content']['text'][:200]}...\n\n"
-                        
-                        prompt = f"""
-                        당신은 의대생의 공부를 도와주는 AI 튜터입니다.
-                        
-                        [현재 강의 내용]:
-                        {current_text}
-                        
-                        [관련된 족보(기출) 내용]:
-                        {context_str}
-                        
-                        명령:
-                        1. 현재 강의 내용이 과거 족보의 어떤 부분과 연결되는지 설명하세요.
-                        2. 시험에 나올만한 핵심 키워드(Key Concept)를 3개 추출하세요.
-                        3. 출제 경향을 바탕으로 간단한 OX 퀴즈를 하나 만드세요.
-                        """
-                        
-                        # 3. 답변 생성
-                        model = genai.GenerativeModel('gemini-1.5-flash')
-                        response = model.generate_content(prompt)
-                        
-                        st.markdown(response.text)
-                        
-                        with st.expander("참고한 족보 원문 보기"):
-                            st.text(context_str)
+                        try:
+                            # 1. 모델 자동 선택
+                            target_model = get_best_model()
+                            if not target_model:
+                                raise Exception("사용 가능한 모델 없음")
+
+                            # 2. 관련 족보 검색
+                            related = find_relevant_jokbo(current_text, st.session_state.db)
+                            
+                            # 3. 프롬프트 생성
+                            context_str = ""
+                            for item in related:
+                                context_str += f"- [출처: {item['content']['source']} p.{item['content']['page']}] (유사도: {item['score']:.2f})\n...{item['content']['text'][:150]}...\n\n"
+                            
+                            prompt = f"""
+                            당신은 의대생 튜터입니다. 아래 정보를 바탕으로 분석하세요.
+                            
+                            [현재 강의 내용]:
+                            {current_text}
+                            
+                            [관련된 족보(기출)]:
+                            {context_str}
+                            
+                            [요청사항]:
+                            1. **기출 연계성**: 이 강의 내용이 과거 족보와 어떻게 연결되는지 한 문장으로 요약하세요.
+                            2. **핵심 포인트**: 시험에 나올만한 키워드 3개를 뽑아주세요.
+                            3. **예상 문제**: 이를 바탕으로 짧은 객관식 문제를
