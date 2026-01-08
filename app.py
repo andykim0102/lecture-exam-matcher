@@ -54,8 +54,7 @@ with st.sidebar:
     st.markdown("### 상태 모니터")
     if st.session_state.jokbo_done:
         st.success("족보 학습 완료")
-    else:
-        st.warning("족보 학습 대기 중")
+
         
     if st.session_state.lecture_done:
         st.success("강의 분석 완료")
@@ -298,3 +297,4 @@ with tab2:
                 st.write("가볍게 읽고 넘어가셔도 좋습니다.")
     else:
         st.warning("데이터 학습 탭에서 강의록을 먼저 업로드하고 분석해주세요.")
+
