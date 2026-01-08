@@ -4,3 +4,5 @@ streamlit-pdf-viewer
 pypdf
 scikit-learn
 pandas
+google-generativeai
+openai
