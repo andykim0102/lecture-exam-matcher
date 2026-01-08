@@ -34,15 +34,24 @@ def get_ai_summary(text, api_key, provider="Gemini"):
     try:
         if provider == "Gemini":
             genai.configure(api_key=api_key)
-            # [해결] 404 에러 방지를 위해 모델 경로 명칭을 최신 규격으로 수정
-            # 'gemini-1.5-flash-latest'는 속도가 가장 빠르고 안정적입니다.
-            model = genai.GenerativeModel('models/gemini-1.5-flash-latest') 
-            response = model.generate_content(prompt)
-            return response.text
+            
+            # [해결책] 모델명을 순차적으로 시도 (가장 확실한 방법)
+            model_names = ['gemini-1.5-flash', 'gemini-pro', 'models/gemini-1.5-flash']
+            
+            last_error = ""
+            for name in model_names:
+                try:
+                    model = genai.GenerativeModel(name)
+                    response = model.generate_content(prompt)
+                    return response.text
+                except Exception as e:
+                    last_error = str(e)
+                    continue # 다음 모델명으로 시도
+            
+            return f"❌ 모든 Gemini 모델 호출 실패. 에러내용: {last_error}"
             
         elif provider == "ChatGPT":
             client = OpenAI(api_key=api_key)
-            # OpenAI 계정 잔액이 있을 경우 gpt-4o-mini가 가장 가성비가 좋습니다.
             response = client.chat.completions.create(
                 model="gpt-4o-mini", 
                 messages=[{"role": "user", "content": prompt}]
@@ -50,9 +59,8 @@ def get_ai_summary(text, api_key, provider="Gemini"):
             return response.choices[0].message.content
             
     except Exception as e:
-        # 429 에러(할당량 초과) 발생 시 사용자에게 친절하게 안내
         if "429" in str(e):
-            return "⚠️ API 할당량이 초과되었습니다. 1분만 기다렸다가 다시 버튼을 눌러보거나, 다른 구글 계정으로 새 API 키를 발급받아보세요."
+            return "⚠️ 할당량 초과(429). 1분 뒤 다시 시도하거나 다른 API 키를 써보세요."
         return f"요약 실패: {str(e)}"
 
 # 사이드바 API 설정
@@ -173,5 +181,6 @@ with tab3:
                 if st.button("삭제", key=f"del_{i}"):
                     st.session_state.notebook.pop(i)
                     st.rerun()
+
 
 
