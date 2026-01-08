@@ -107,18 +107,33 @@ with tab1:
             st.error("API Key를 입력하세요.")
         else:
             bar = st.progress(0)
+            status = st.empty() # 상태 메시지용
             new_db = []
+            
+            # 전체 작업량 계산 (프로그레스 바용)
+            total_files = len(files)
+            
             for i, f in enumerate(files):
+                status.text(f"📖 파일 읽는 중: {f.name}...")
                 pages = extract_text_from_pdf(f)
-                for p in pages:
+                
+                for j, p in enumerate(pages):
+                    # 상세 진행상황 표시
+                    status.text(f"🧠 학습 중: {f.name} ({j+1}/{len(pages)} 페이지)...")
+                    
                     emb = get_embedding(p['text'])
                     if emb:
                         p['embedding'] = emb
                         new_db.append(p)
-                bar.progress((i + 1) / len(files))
+                    
+                    # [핵심 수정] 과부하 방지를 위해 2초 대기
+                    time.sleep(2.0) 
+                
+                bar.progress((i + 1) / total_files)
             
             st.session_state.db.extend(new_db)
-            st.success(f"{len(new_db)} 페이지 학습 완료!")
+            status.text("✅ 모든 학습이 완료되었습니다!")
+            st.success(f"총 {len(new_db)} 페이지 학습 완료!")
 
 # --- TAB 2: 강의 분석 ---
 with tab2:
@@ -173,4 +188,5 @@ with tab2:
                             st.markdown(res.text)
                         except Exception as e:
                             st.error(f"Error: {e}")
+
 
