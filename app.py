@@ -34,18 +34,20 @@ def get_ai_summary(text, api_key, provider="Gemini"):
     try:
         if provider == "Gemini":
             genai.configure(api_key=api_key)
-            model = genai.GenerativeModel('gemini-pro')
+            # [수정] 모델명을 gemini-pro에서 gemini-1.5-flash로 변경 (가장 안정적)
+            model = genai.GenerativeModel('gemini-1.5-flash') 
             response = model.generate_content(prompt)
             return response.text
         elif provider == "ChatGPT":
             client = OpenAI(api_key=api_key)
+            # [수정] GPT 모델도 최신 gpt-4o-mini로 변경 (비용 절감 및 속도 향상)
             response = client.chat.completions.create(
-                model="gpt-4o", messages=[{"role": "user", "content": prompt}]
+                model="gpt-4o-mini", messages=[{"role": "user", "content": prompt}]
             )
             return response.choices[0].message.content
     except Exception as e:
         if "429" in str(e):
-            return "⚠️ API 할당량이 초과되었습니다. Gemini 무료 키를 사용하거나 OpenAI 계정의 잔액을 확인해주세요."
+            return "⚠️ API 할당량이 초과되었습니다. 잠시 후 다시 시도하거나 계정 설정을 확인해주세요."
         return f"요약 실패: {str(e)}"
 
 # 사이드바 API 설정
@@ -166,3 +168,4 @@ with tab3:
                 if st.button("삭제", key=f"del_{i}"):
                     st.session_state.notebook.pop(i)
                     st.rerun()
+
