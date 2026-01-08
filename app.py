@@ -23,16 +23,18 @@ st.markdown("""
 for key in ['notebook', 'pre_analysis', 'pdf_bytes', 'exam_db']:
     if key not in st.session_state: st.session_state[key] = [] if key != 'pdf_bytes' else None
 
-# [해결 2, 3] AI 요약 함수 (가독성 개선)
 def get_ai_summary(text, api_key, provider="Gemini"):
-    if not api_key: return "⚠️ API 키를 입력하면 AI 요약이 제공됩니다."
+    if not api_key: 
+        return "🔑 사이드바에 API 키를 입력하면 AI 요약이 활성화됩니다."
     
-    prompt = f"다음은 의대 기출문제 지문입니다. 핵심 내용만 3줄 이내로 요약해줘:\n\n{text}"
+    prompt = f"다음 의대 기출 지문을 핵심 위주로 3줄 요약해줘:\n\n{text}"
+    
     try:
         if provider == "Gemini":
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel('gemini-pro')
-            return model.generate_content(prompt).text
+            response = model.generate_content(prompt)
+            return response.text
         elif provider == "ChatGPT":
             client = OpenAI(api_key=api_key)
             response = client.chat.completions.create(
@@ -40,8 +42,10 @@ def get_ai_summary(text, api_key, provider="Gemini"):
             )
             return response.choices[0].message.content
     except Exception as e:
+        # [해결] 에러 발생 시 사용자 친절 안내
+        if "429" in str(e):
+            return "⚠️ API 할당량이 초과되었습니다. Gemini 무료 키를 사용하거나 OpenAI 계정의 잔액을 확인해주세요."
         return f"요약 실패: {str(e)}"
-
 # 사이드바 API 설정
 with st.sidebar:
     st.header("⚙️ AI 설정")
@@ -95,30 +99,49 @@ with tab2:
             # [해결 1] 높이 고정 및 스크롤 영역 확보
             pdf_viewer(st.session_state.pdf_bytes, pages_to_render=[page_num], width=800, height=900)
         
-        with c2:
-            st.subheader("⚡ 실시간 족보/AI")
-            page_hits = [h for h in st.session_state.pre_analysis if h['page'] == page_num]
+       with c2:
+            st.subheader("⚡ 실시간 족보 & AI 요약")
+            page_hits = [h for h in st.session_state.pre_analysis if h['page'] == page_idx]
+            
             if page_hits:
                 for h in page_hits:
                     with st.container(border=True):
                         st.error(f"🔥 기출 적중 ({int(h['score']*100)}% 일치)")
                         st.markdown(f"**📍 출처:** {h['info']}")
                         
-                        # [해결 2] AI 요약본 우선 노출 (가독성 최우선)
-                        st.markdown("**🤖 AI 핵심 요약**")
-                        summary = get_ai_summary(h['content'], api_key, ai_provider)
-                        st.info(summary)
+                        # [개선] 버튼 클릭 시에만 AI 요약 실행 (비용 및 에러 방지)
+                        st.markdown("**🤖 AI 족보 브리핑**")
                         
-                        # 원문은 접어두기
-                        with st.expander("📄 원문 전체 보기"):
+                        # 세션에 요약 결과가 없으면 버튼 노출, 있으면 요약문 노출
+                        summary_key = f"sum_res_{page_idx}"
+                        if st.button("🪄 AI 요약 요청하기", key=f"btn_sum_{page_idx}"):
+                            with st.spinner("AI가 분석 중..."):
+                                summary = get_ai_summary(h['content'], user_api_key, ai_provider)
+                                st.session_state[summary_key] = summary # 결과 저장
+                        
+                        # 저장된 요약 결과가 있다면 화면에 표시
+                        if summary_key in st.session_state:
+                            st.info(st.session_state[summary_key])
+                        else:
+                            st.caption("위 버튼을 누르면 AI가 핵심 3줄 요약을 생성합니다.")
+                        
+                        with st.expander("📄 원문 전체 확인"):
                             st.write(h['content'])
                         
-                        note = st.text_area("수업 중 메모", key=f"note_{page_num}")
-                        if st.button("📌 내 정리본에 추가", key=f"btn_{page_num}"):
-                            st.session_state.notebook.append({"page": page_num, "info": h['info'], "summary": summary, "note": note})
-                            st.toast("저장되었습니다!")
+                        # 메모 및 저장 로직
+                        user_note = st.text_area("중요 메모 입력", key=f"note_{page_idx}")
+                        if st.button("📌 내 정리본에 추가", key=f"save_{page_idx}"):
+                            # 요약이 아직 안 된 경우 원문 앞부분이라도 저장
+                            final_summary = st.session_state.get(summary_key, h['content'][:100] + "...")
+                            st.session_state.notebook.append({
+                                "page": page_idx, 
+                                "info": h['info'], 
+                                "summary": final_summary, 
+                                "note": user_note
+                            })
+                            st.toast("정리본에 저장되었습니다!")
             else:
-                st.info("기출 내역이 없습니다.")
+                st.info("이 페이지는 관련 족보 기록이 없습니다.")
 
 # --- [Tab 3: 정리본] ---
 with tab3:
@@ -130,3 +153,4 @@ with tab3:
             if st.button("삭제", key=f"del_{i}"):
                 st.session_state.notebook.pop(i)
                 st.rerun()
+
