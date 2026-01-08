@@ -135,7 +135,7 @@ with tab1:
             status.text("✅ 모든 학습이 완료되었습니다!")
             st.success(f"총 {len(new_db)} 페이지 학습 완료!")
 
-# --- TAB 2: 강의 분석 (재시도 로직 추가됨) ---
+# --- TAB 2: 강의 분석 (안정성 강화 버전) ---
 with tab2:
     st.header("2. 강의 뷰어 & AI")
     lec_file = st.file_uploader("강의록 PDF", type="pdf", key="lec")
@@ -166,31 +166,42 @@ with tab2:
                 if not api_key or not st.session_state.db:
                     st.error("API Key 또는 족보 데이터가 없습니다.")
                 else:
-                    # 빈 텍스트 체크
                     if not curr_text.strip():
                         st.warning("이 페이지에는 텍스트가 거의 없습니다. (이미지 위주)")
                     else:
-                        with st.spinner("분석 중... (트래픽이 많으면 5~10초 걸릴 수 있습니다)"):
+                        with st.spinner("분석 중... (최대 30초 소요)"):
                             try:
-                                # 1. 관련 족보 찾기 (이건 보통 에러 안 남)
+                                # 1. 관련 족보 찾기
                                 related = find_relevant_jokbo(curr_text, st.session_state.db)
                                 
-                                # 텍스트 정리
                                 ctx_list = []
                                 for item in related:
                                     info = f"- {item['content']['source']} ({item['score']:.2f}): {item['content']['text'][:100]}..."
                                     ctx_list.append(info)
                                 ctx_str = "\n".join(ctx_list)
                                 
-                                # 프롬프트
                                 prompt_text = "당신은 의대생 튜터입니다.\n"
                                 prompt_text += f"[현재 강의]: {curr_text}\n"
                                 prompt_text += f"[관련 족보]: {ctx_str}\n\n"
                                 prompt_text += "요청:\n1. 강의와 족보의 연관성 요약\n2. 핵심 키워드 3개\n3. 예상 객관식 문제 1개"
 
-                                # 2. AI 답변 생성 (여기에 재시도 로직 적용!)
-                                model_name = get_best_model()
-                                model = genai.GenerativeModel(model_name)
+                                # [수정됨] 2. 모델 강제 지정 및 재시도 로직 강화
+                                # gemini-2.5-flash 대신 안정적인 1.5-flash를 명시적으로 찾습니다.
+                                target_model = "gemini-1.5-flash"
+                                
+                                # 만약 1.5-flash가 목록에 없으면 기존 자동 탐색 사용
+                                all_models = [m.name for m in genai.list_models()]
+                                found_exact_model = False
+                                for m in all_models:
+                                    if "gemini-1.5-flash" in m:
+                                        target_model = m
+                                        found_exact_model = True
+                                        break
+                                
+                                if not found_exact_model:
+                                    target_model = get_best_model() # 없으면 자동 선택
+
+                                model = genai.GenerativeModel(target_model)
                                 
                                 response_text = ""
                                 max_retries = 3
@@ -199,19 +210,23 @@ with tab2:
                                     try:
                                         res = model.generate_content(prompt_text)
                                         response_text = res.text
-                                        break # 성공하면 반복문 탈출
+                                        break 
                                     except Exception as e:
-                                        if "429" in str(e): # 429 에러(속도제한) 발생 시
+                                        if "429" in str(e): # 429 에러 발생 시
                                             if attempt < max_retries - 1:
-                                                time.sleep(5) # 5초 쉬고 다시 시도
+                                                # 대기 시간을 20초로 대폭 늘림 (확실한 해결)
+                                                wait_time = 20
+                                                st.toast(f"사용량이 많아 {wait_time}초 대기 후 재시도합니다... ({attempt+1}/{max_retries})")
+                                                time.sleep(wait_time)
                                                 continue
                                             else:
-                                                st.error("트래픽이 너무 많아 실패했습니다. 잠시 후 다시 시도해주세요.")
+                                                st.error("지금 구글 AI 서버가 붐빕니다. 1분 뒤에 다시 시도해주세요.")
                                         else:
                                             st.error(f"Error: {e}")
                                             break
 
                                 if response_text:
+                                    st.success(f"분석 완료! (Model: {target_model})")
                                     st.markdown(response_text)
                                     
                             except Exception as e:
