@@ -1,6 +1,6 @@
 streamlit
 streamlit-mic-recorder
+streamlit-pdf-viewer
 pypdf
 scikit-learn
-joblib
 pandas
