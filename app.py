@@ -4,6 +4,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+import time
 
 # ==========================================
 # 1. 설정 및 초기화
@@ -172,3 +173,4 @@ with tab2:
                             st.markdown(res.text)
                         except Exception as e:
                             st.error(f"Error: {e}")
+
