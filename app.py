@@ -135,7 +135,7 @@ with tab1:
             status.text("✅ 모든 학습이 완료되었습니다!")
             st.success(f"총 {len(new_db)} 페이지 학습 완료!")
 
-# --- TAB 2: 강의 분석 ---
+# --- TAB 2: 강의 분석 (재시도 로직 추가됨) ---
 with tab2:
     st.header("2. 강의 뷰어 & AI")
     lec_file = st.file_uploader("강의록 PDF", type="pdf", key="lec")
@@ -166,27 +166,53 @@ with tab2:
                 if not api_key or not st.session_state.db:
                     st.error("API Key 또는 족보 데이터가 없습니다.")
                 else:
-                    with st.spinner("분석 중..."):
-                        try:
-                            related = find_relevant_jokbo(curr_text, st.session_state.db)
-                            
-                            # 검색된 족보 텍스트 정리
-                            ctx_list = []
-                            for item in related:
-                                info = f"- {item['content']['source']} ({item['score']:.2f}): {item['content']['text'][:100]}..."
-                                ctx_list.append(info)
-                            ctx_str = "\n".join(ctx_list)
-                            
-                            # 프롬프트 구성 (들여쓰기 오류 방지를 위해 단순 문자열 사용)
-                            prompt_text = "당신은 의대생 튜터입니다.\n"
-                            prompt_text += f"[현재 강의]: {curr_text}\n"
-                            prompt_text += f"[관련 족보]: {ctx_str}\n\n"
-                            prompt_text += "요청:\n1. 강의와 족보의 연관성 요약\n2. 핵심 키워드 3개\n3. 예상 객관식 문제 1개"
+                    # 빈 텍스트 체크
+                    if not curr_text.strip():
+                        st.warning("이 페이지에는 텍스트가 거의 없습니다. (이미지 위주)")
+                    else:
+                        with st.spinner("분석 중... (트래픽이 많으면 5~10초 걸릴 수 있습니다)"):
+                            try:
+                                # 1. 관련 족보 찾기 (이건 보통 에러 안 남)
+                                related = find_relevant_jokbo(curr_text, st.session_state.db)
+                                
+                                # 텍스트 정리
+                                ctx_list = []
+                                for item in related:
+                                    info = f"- {item['content']['source']} ({item['score']:.2f}): {item['content']['text'][:100]}..."
+                                    ctx_list.append(info)
+                                ctx_str = "\n".join(ctx_list)
+                                
+                                # 프롬프트
+                                prompt_text = "당신은 의대생 튜터입니다.\n"
+                                prompt_text += f"[현재 강의]: {curr_text}\n"
+                                prompt_text += f"[관련 족보]: {ctx_str}\n\n"
+                                prompt_text += "요청:\n1. 강의와 족보의 연관성 요약\n2. 핵심 키워드 3개\n3. 예상 객관식 문제 1개"
 
-                            model = genai.GenerativeModel(get_best_model())
-                            res = model.generate_content(prompt_text)
-                            st.markdown(res.text)
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                                # 2. AI 답변 생성 (여기에 재시도 로직 적용!)
+                                model_name = get_best_model()
+                                model = genai.GenerativeModel(model_name)
+                                
+                                response_text = ""
+                                max_retries = 3
+                                
+                                for attempt in range(max_retries):
+                                    try:
+                                        res = model.generate_content(prompt_text)
+                                        response_text = res.text
+                                        break # 성공하면 반복문 탈출
+                                    except Exception as e:
+                                        if "429" in str(e): # 429 에러(속도제한) 발생 시
+                                            if attempt < max_retries - 1:
+                                                time.sleep(5) # 5초 쉬고 다시 시도
+                                                continue
+                                            else:
+                                                st.error("트래픽이 너무 많아 실패했습니다. 잠시 후 다시 시도해주세요.")
+                                        else:
+                                            st.error(f"Error: {e}")
+                                            break
 
-
+                                if response_text:
+                                    st.markdown(response_text)
+                                    
+                            except Exception as e:
+                                st.error(f"Error: {e}")
