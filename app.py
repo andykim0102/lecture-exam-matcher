@@ -9,26 +9,30 @@ from sklearn.metrics.pairwise import cosine_similarity
 from streamlit_mic_recorder import mic_recorder
 from streamlit_pdf_viewer import pdf_viewer
 
-# =========================
-# 1. 초기 설정 및 AI 연결 함수
-# =========================
+# 1. 초기 설정
 st.set_page_config(page_title="Med-Study AI", layout="wide")
 
-# 세션 초기화
+# [해결 1] 뷰어 잘림 방지를 위한 강제 스타일 설정
+st.markdown("""
+    <style>
+    .stMainBlockContainer { padding-top: 2rem; }
+    iframe { min-height: 850px !important; }
+    </style>
+    """, unsafe_allow_html=True)
+
 for key in ['notebook', 'pre_analysis', 'pdf_bytes', 'exam_db']:
     if key not in st.session_state: st.session_state[key] = [] if key != 'pdf_bytes' else None
 
+# [해결 2, 3] AI 요약 함수 (가독성 개선)
 def get_ai_summary(text, api_key, provider="Gemini"):
-    """LLM을 사용하여 방대한 족보 지문을 핵심 3줄로 요약"""
-    if not api_key: return text[:300] + "..." # 키가 없으면 그냥 자르기
+    if not api_key: return "⚠️ API 키를 입력하면 AI 요약이 제공됩니다."
     
-    prompt = f"의대생의 족보 공부를 돕기 위해 다음 지문을 핵심 내용만 3줄 이내로 요약해줘:\n\n{text}"
+    prompt = f"다음은 의대 기출문제 지문입니다. 핵심 내용만 3줄 이내로 요약해줘:\n\n{text}"
     try:
         if provider == "Gemini":
             genai.configure(api_key=api_key)
             model = genai.GenerativeModel('gemini-pro')
-            response = model.generate_content(prompt)
-            return response.text
+            return model.generate_content(prompt).text
         elif provider == "ChatGPT":
             client = OpenAI(api_key=api_key)
             response = client.chat.completions.create(
@@ -38,41 +42,35 @@ def get_ai_summary(text, api_key, provider="Gemini"):
     except Exception as e:
         return f"요약 실패: {str(e)}"
 
-# =========================
-# 2. 메인 UI (사이드바에 API 설정 추가)
-# =========================
+# 사이드바 API 설정
 with st.sidebar:
     st.header("⚙️ AI 설정")
     ai_provider = st.selectbox("LLM 선택", ["Gemini", "ChatGPT"])
     api_key = st.text_input(f"{ai_provider} API Key", type="password")
-    st.info("API 키를 넣으면 족보 원문을 AI가 요약해줍니다.")
 
 st.title("🩺 의대생 전용 스마트 학습 OS")
+tab1, tab2, tab3 = st.tabs(["📅 사전 분석", "🎙️ 실시간 매칭", "🎯 나만의 정리본"])
 
-tab1, tab2, tab3 = st.tabs(["📅 수업 전: 분석", "🎙️ 수업 중: 실시간 매칭", "🎯 수업 후: 정리본"])
-
-# --- [Tab 1: 수업 전 분석] (기존 로직 유지) ---
+# --- [Tab 1: 분석] (로직 동일) ---
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("📚 족보 등록")
         exam_files = st.file_uploader("족보 PDF 업로드", type="pdf", accept_multiple_files=True)
-        if st.button("족보 인덱싱"):
+        if st.button("족보 DB화"):
             db = []
             for f in exam_files:
-                reader = PdfReader(f)
-                for i, page in enumerate(reader.pages):
+                for i, page in enumerate(PdfReader(f).pages):
                     text = page.extract_text()
                     if text: db.append({"source": f"{f.name} (p.{i+1})", "content": text.strip()})
             st.session_state.exam_db = db
-            st.success("족보 DB 구축 완료")
-
+            st.success("완료")
     with col2:
         st.subheader("📖 강의록 분석")
         lec_file = st.file_uploader("강의록 PDF", type="pdf")
         if lec_file:
             st.session_state.pdf_bytes = lec_file.getvalue()
-            if st.button("사전 분석 실행"):
+            if st.button("매칭 시작"):
                 lec_texts = [p.extract_text() for p in PdfReader(lec_file).pages]
                 vec = TfidfVectorizer(ngram_range=(1, 2))
                 exam_matrix = vec.fit_transform([e['content'] for e in st.session_state.exam_db])
@@ -83,51 +81,52 @@ with tab1:
                     sims = cosine_similarity(qv, exam_matrix).flatten()
                     if sims.max() > 0.18:
                         idx = sims.argmax()
-                        results.append({
-                            "page": i+1, "score": sims.max(),
-                            "info": st.session_state.exam_db[idx]['source'],
-                            "content": st.session_state.exam_db[idx]['content']
-                        })
+                        results.append({"page": i+1, "score": sims.max(), "info": st.session_state.exam_db[idx]['source'], "content": st.session_state.exam_db[idx]['content']})
                 st.session_state.pre_analysis = results
-                st.success("분석 완료!")
+                st.success("완료!")
 
-# --- [Tab 2: 수업 중 뷰어 & AI 요약] ---
+# --- [Tab 2: 실시간 & 뷰어] ---
 with tab2:
     if st.session_state.pdf_bytes:
         c1, c2 = st.columns([1.1, 0.9])
-        
         with c1:
-            st.subheader("📄 강의록 실시간 뷰어")
+            st.subheader("📄 강의록 뷰어")
             page_num = st.number_input("페이지", min_value=1, value=1)
-            # [해결 1] 컨테이너 높이를 고정하여 하단 잘림 방지
-            with st.container(height=850, border=False):
-                pdf_viewer(st.session_state.pdf_bytes, pages_to_render=[page_num], width=800)
+            # [해결 1] 높이 고정 및 스크롤 영역 확보
+            pdf_viewer(st.session_state.pdf_bytes, pages_to_render=[page_num], width=800, height=900)
         
         with c2:
             st.subheader("⚡ 실시간 족보/AI")
             page_hits = [h for h in st.session_state.pre_analysis if h['page'] == page_num]
-            
             if page_hits:
                 for h in page_hits:
                     with st.container(border=True):
                         st.error(f"🔥 기출 적중 ({int(h['score']*100)}% 일치)")
                         st.markdown(f"**📍 출처:** {h['info']}")
                         
-                        # [해결 2, 3] AI 요약 적용
-                        st.markdown("**🤖 AI 족보 요약**")
-                        with st.spinner("AI가 요약 중..."):
-                            summary = get_ai_summary(h['content'], api_key, ai_provider)
-                            st.info(summary)
+                        # [해결 2] AI 요약본 우선 노출 (가독성 최우선)
+                        st.markdown("**🤖 AI 핵심 요약**")
+                        summary = get_ai_summary(h['content'], api_key, ai_provider)
+                        st.info(summary)
                         
+                        # 원문은 접어두기
                         with st.expander("📄 원문 전체 보기"):
                             st.write(h['content'])
                         
-                        user_note = st.text_area("메모 입력", key=f"note_{page_num}")
-                        if st.button("📌 저장", key=f"btn_{page_num}"):
-                            st.session_state.notebook.append({
-                                "page": page_num, "info": h['info'], 
-                                "summary": summary, "note": user_note
-                            })
-                            st.toast("저장 완료!")
+                        note = st.text_area("수업 중 메모", key=f"note_{page_num}")
+                        if st.button("📌 내 정리본에 추가", key=f"btn_{page_num}"):
+                            st.session_state.notebook.append({"page": page_num, "info": h['info'], "summary": summary, "note": note})
+                            st.toast("저장되었습니다!")
             else:
-                st.info("기출 포인트가 없습니다.")
+                st.info("기출 내역이 없습니다.")
+
+# --- [Tab 3: 정리본] ---
+with tab3:
+    st.header("📝 나만의 스마트 정리본")
+    for i, item in enumerate(st.session_state.notebook):
+        with st.expander(f"📔 [강의록 {item['page']}p] {item['info']}", expanded=True):
+            st.markdown(f"**🤖 AI 요약:** {item['summary']}")
+            st.success(f"**✏️ 나의 메모:** {item['note']}")
+            if st.button("삭제", key=f"del_{i}"):
+                st.session_state.notebook.pop(i)
+                st.rerun()
