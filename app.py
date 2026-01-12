@@ -5,6 +5,7 @@ from PIL import Image
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 import time
+from streamlit_mic_recorder import mic_recorder
 
 # ==========================================
 # 1. 설정 및 초기화
@@ -165,3 +166,111 @@ with tab2:
                                     st.error("⚠️ 사용량이 많습니다. 30초 뒤에 다시 시도해주세요.")
                                 else:
                                     st.error(f"에러 발생: {e}")
+
+# [업데이트] 오디오 처리를 위한 함수 추가
+def process_audio_and_find_jokbo(audio_bytes, db):
+    """오디오를 텍스트로 변환하고 관련 족보를 찾음"""
+    if not db: return "학습된 족보가 없습니다.", []
+    
+    # 1. Gemini에게 오디오를 주고 텍스트 변환 요청 (STT)
+    # 1.5-flash는 멀티모달이라 오디오 직접 입력 가능
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    
+    # 오디오 바이트 처리
+    prompt = "이 오디오 파일의 내용을 한국어로 정확하게 받아써줘(Transcribe)."
+    
+    try:
+        # 오디오 데이터는 바이트 그대로 넘기기보다, 임시 파일 처리하거나 
+        # API 구조에 맞게 Part 객체로 넘겨야 하지만, 
+        # 간편하게는 텍스트 프롬프트로 처리하기보다 generate_content에 
+        # mime_type을 지정한 blob 데이터를 넘기는 방식이 좋습니다.
+        
+        response = model.generate_content([
+            prompt,
+            {"mime_type": "audio/wav", "data": audio_bytes}
+        ])
+        transcribed_text = response.text
+    except Exception as e:
+        return f"오디오 처리 실패: {e}", []
+
+    # 2. 변환된 텍스트로 족보 검색
+    related_jokbo = find_relevant_jokbo(transcribed_text, db)
+    
+    return transcribed_text, related_jokbo
+
+# ... (기존 get_embedding, find_relevant_jokbo 함수 동일) ...
+
+# ==========================================
+# 4. 메인 UI
+# ==========================================
+# 탭 구조 변경: 오디오 기능 탭 추가
+tab1, tab2, tab3 = st.tabs(["📂 족보 학습", "📖 강의 공부", "🎙️ 실시간 강의 분석"])
+
+# ... (tab1, tab2 코드는 기존과 동일 유지) ...
+
+# --- TAB 3: 실시간 강의 분석 (신규 기능) ---
+with tab3:
+    st.header("3. 실시간 강의 듣기 & 족보 매칭")
+    st.info("강의를 듣다가 '이거 나올 것 같은데?' 싶을 때 녹음하세요.")
+
+    # 1. 녹음기 위젯
+    # start_prompt: 녹음 시작 버튼 텍스트, stop_prompt: 정지 버튼 텍스트
+    audio = mic_recorder(
+        start_prompt="🔴 녹음 시작 (교수님 말씀)",
+        stop_prompt="⏹️ 분석 시작",
+        key='recorder',
+        format="wav" # wav 포맷 권장
+    )
+
+    if audio:
+        st.divider()
+        st.subheader("🔊 분석 결과")
+        
+        if not api_key:
+            st.error("설정 탭에서 API Key를 먼저 입력해주세요.")
+        elif not st.session_state.db:
+            st.warning("먼저 '족보 학습' 탭에서 족보를 학습시켜주세요.")
+        else:
+            with st.spinner("교수님 말씀 받아쓰기 & 족보 뒤지는 중..."):
+                # 오디오 바이트 가져오기
+                audio_bytes = audio['bytes']
+                
+                # 로직 수행
+                transcript, related = process_audio_and_find_jokbo(audio_bytes, st.session_state.db)
+                
+                # 결과 출력 1: 스크립트
+                st.markdown(f"**🗣️ 교수님 말씀 (STT):**")
+                st.write(f"> {transcript}")
+                
+                # 결과 출력 2: 매칭된 족보
+                st.markdown(f"**📄 관련 족보 내용:**")
+                context_str = ""
+                for idx, item in enumerate(related):
+                    with st.expander(f"관련 족보 #{idx+1} (유사도: {item['score']:.4f})"):
+                        st.write(f"페이지: {item['content']['page']}")
+                        st.write(item['content']['text'])
+                        context_str += f"- (페이지 {item['content']['page']}) {item['content']['text']}\n"
+
+                # 결과 출력 3: 최종 인사이트 (AI 분석)
+                st.divider()
+                st.markdown("### 🩺 Med-Study AI의 통찰")
+                
+                if context_str:
+                    final_prompt = f"""
+                    상황: 의대 강의 중입니다.
+                    교수님 말씀: {transcript}
+                    
+                    관련된 과거 족보 내용:
+                    {context_str}
+                    
+                    미션:
+                    1. 교수님의 말씀이 족보의 어떤 부분과 연결되는지 분석해.
+                    2. "이 내용은 족보 O페이지의 내용 변형입니다" 또는 "족보에는 없던 새로운 강조점입니다" 처럼 구체적으로 지적해.
+                    3. 시험에 어떻게 나올지 예측해줘.
+                    """
+                    
+                    model = genai.GenerativeModel("gemini-1.5-flash")
+                    res = model.generate_content(final_prompt)
+                    st.markdown(res.text)
+                else:
+                    st.write("관련된 족보 내용을 찾지 못했습니다. 새로운 내용일 수 있습니다!")
