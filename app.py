@@ -1,5 +1,7 @@
 import streamlit as st
 import google.generativeai as genai
+# [디버깅용 코드] 화면 맨 위에 버전이 표시됩니다.
+st.write(f"현재 google-generativeai 버전: {genai.__version__}")
 import fitz  # PyMuPDF
 from PIL import Image
 import numpy as np
@@ -274,3 +276,4 @@ with tab3:
                     st.markdown(res.text)
                 else:
                     st.write("관련된 족보 내용을 찾지 못했습니다. 새로운 내용일 수 있습니다!")
+
