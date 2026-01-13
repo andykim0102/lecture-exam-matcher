@@ -1,3 +1,4 @@
+# app.py
 import time
 import streamlit as st
 import google.generativeai as genai
@@ -36,11 +37,15 @@ if "best_text_model" not in st.session_state:
 if "api_key_ok" not in st.session_state:
     st.session_state.api_key_ok = False
 
+if "api_key" not in st.session_state:
+    st.session_state.api_key = None
+
 # ==========================================
 # 1.5. 족보 근거 판단 임계값
 # ==========================================
 # 데모 추천: 0.70~0.75 사이. 너무 높으면 "없음"이 자주 뜸.
 JOKBO_THRESHOLD = 0.72
+
 
 def has_jokbo_evidence(related: list[dict]) -> bool:
     """관련 족보가 '있다'고 판단할 최소 조건"""
@@ -52,13 +57,22 @@ def has_jokbo_evidence(related: list[dict]) -> bool:
 # ==========================================
 def extract_text_from_pdf(file):
     """PDF를 텍스트로 변환 (fitz 사용)"""
-    doc = fitz.open(stream=file.read(), filetype="pdf")
+    # ✅ Streamlit UploadedFile은 read() 재사용 이슈가 있어 getvalue() 사용
+    data = file.getvalue()
+    doc = fitz.open(stream=data, filetype="pdf")
+
     pages = []
     for i, page in enumerate(doc):
         text = page.get_text() or ""
         if text.strip():
             pages.append({"page": i + 1, "text": text, "source": file.name})
     return pages
+
+
+def ensure_configured():
+    """Gemini SDK가 항상 api_key로 configure 되도록 보장"""
+    if st.session_state.get("api_key"):
+        genai.configure(api_key=st.session_state["api_key"])
 
 
 def get_embedding(text: str):
@@ -69,6 +83,8 @@ def get_embedding(text: str):
 
     # 데모 안정성: 너무 긴 텍스트 컷
     text = text[:12000]
+
+    ensure_configured()
 
     try:
         return genai.embed_content(
@@ -130,6 +146,8 @@ def pick_best_text_model(model_names: list[str]):
 
 
 def generate_with_fallback(prompt: str, model_names: list[str]):
+    ensure_configured()
+
     last_err = None
     for name in model_names:
         if not name:
@@ -326,7 +344,9 @@ with st.sidebar:
 
     if api_key:
         try:
+            st.session_state.api_key = api_key
             genai.configure(api_key=api_key)
+
             available_models = list_text_models(api_key)
 
             if not available_models:
@@ -354,9 +374,7 @@ with st.sidebar:
 # ==========================================
 # 7. 메인 UI
 # ==========================================
-tab1, tab2, tab3 = st.tabs(
-    ["📂 족보 학습", "📖 강의 공부", "⌨️ 실시간 텍스트 분석"]
-)
+tab1, tab2, tab3 = st.tabs(["📂 족보 학습", "📖 강의 공부", "⌨️ 실시간 텍스트 분석"])
 
 # ==================================================
 # TAB 1 — 족보 학습
@@ -365,15 +383,16 @@ with tab1:
     st.header("📂 족보 학습")
     st.info("과거 시험 족보를 학습시켜, 강의 내용과 시험 출제 포인트를 연결합니다.")
 
-    files = st.file_uploader(
-        "족보 PDF 업로드", type="pdf", accept_multiple_files=True
-    )
+    files = st.file_uploader("족보 PDF 업로드", type="pdf", accept_multiple_files=True)
 
     col_a, col_b = st.columns([1, 2])
     with col_a:
         max_pages = st.number_input(
             "파일당 최대 학습 페이지(데모용)",
-            min_value=1, max_value=200, value=30, step=1
+            min_value=1,
+            max_value=200,
+            value=30,
+            step=1,
         )
     with col_b:
         st.caption("데모 안정성을 위해 파일당 학습 페이지를 제한하는 것을 권장합니다.")
@@ -396,9 +415,7 @@ with tab1:
             pages = extract_text_from_pdf(f)[: int(max_pages)]
 
             for j, p in enumerate(pages):
-                status.text(
-                    f"🧠 DB 구축 중: {f.name} ({j+1}/{len(pages)} 페이지)"
-                )
+                status.text(f"🧠 DB 구축 중: {f.name} ({j+1}/{len(pages)} 페이지)")
                 emb = get_embedding(p["text"])
                 if emb:
                     p["embedding"] = emb
@@ -423,13 +440,9 @@ with tab2:
     # 과목 선택 + 기타 입력
     c1, c2 = st.columns([1, 2])
     with c1:
-        subject_choice = st.selectbox(
-            "과목", ["해부학", "생리학", "약리학", "기타"], index=1
-        )
+        subject_choice = st.selectbox("과목", ["해부학", "생리학", "약리학", "기타"], index=1)
     with c2:
-        custom_subject = st.text_input(
-            "기타 과목명", disabled=(subject_choice != "기타")
-        )
+        custom_subject = st.text_input("기타 과목명", disabled=(subject_choice != "기타"))
 
     subject_final = resolve_subject(subject_choice, custom_subject)
     st.caption(f"현재 과목: **{subject_final}**")
@@ -437,13 +450,10 @@ with tab2:
     lec_file = st.file_uploader("강의록 PDF", type="pdf", key="lec")
 
     if lec_file:
-        if (
-            st.session_state.lecture_doc is None
-            or st.session_state.lecture_filename != lec_file.name
-        ):
-            st.session_state.lecture_doc = fitz.open(
-                stream=lec_file.read(), filetype="pdf"
-            )
+        if st.session_state.lecture_doc is None or st.session_state.lecture_filename != lec_file.name:
+            # ✅ read() 대신 getvalue()로 안정적 bytes 확보
+            data = lec_file.getvalue()
+            st.session_state.lecture_doc = fitz.open(stream=data, filetype="pdf")
             st.session_state.lecture_filename = lec_file.name
             st.session_state.current_page = 0
 
@@ -460,7 +470,7 @@ with tab2:
 
             b2.markdown(
                 f"<center>{st.session_state.current_page+1}/{len(doc)}</center>",
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
 
             if b3.button("▶"):
@@ -471,12 +481,12 @@ with tab2:
             pix = page.get_pixmap(dpi=150)
             st.image(
                 Image.frombytes("RGB", [pix.width, pix.height], pix.samples),
-                use_container_width=True
+                use_container_width=True,
             )
 
             page_text = (page.get_text() or "").strip()
             if not page_text:
-                st.warning("이 페이지에는 텍스트가 없습니다.")
+                st.warning("이 페이지에는 텍스트가 없습니다. (스캔 PDF면 OCR이 필요할 수 있어요)")
 
         # ---------- AI Analyzer ----------
         with col_ai:
@@ -490,9 +500,7 @@ with tab2:
                     st.error("분석할 텍스트가 없습니다.")
                     st.stop()
 
-                related = find_relevant_jokbo(
-                    page_text, st.session_state.db, top_k=3
-                )
+                related = find_relevant_jokbo(page_text, st.session_state.db, top_k=3)
 
                 # ✅ 족보 근거 없으면 AI 호출 스킵
                 if not has_jokbo_evidence(related):
@@ -501,9 +509,7 @@ with tab2:
 
                 # 1) 족보 근거 먼저 표시
                 for i, r in enumerate(related):
-                    with st.expander(
-                        f"족보 근거 #{i+1} (유사도 {r['score']:.3f})"
-                    ):
+                    with st.expander(f"족보 근거 #{i+1} (유사도 {r['score']:.3f})"):
                         st.write(f"페이지 {r['content']['page']}")
                         st.write(r["content"]["text"])
 
@@ -516,14 +522,14 @@ with tab2:
                     subject=subject_final,
                     lecture_text=page_text,
                     jokbo_ctx=jokbo_ctx,
-                    mode="page"
+                    mode="page",
                 )
 
+                # ✅ 하드코딩 모델명 fallback 제거 (list_models 기반만 사용)
                 models = st.session_state.text_models or []
-                fallback = models + ["models/gemini-1.5-flash-latest"]
 
                 with st.spinner("족보 기반 분석 중..."):
-                    result, used = generate_with_fallback(prompt, fallback)
+                    result, used = generate_with_fallback(prompt, models)
                     st.caption(f"사용 모델: {used}")
                     sections = parse_ai_sections(result)
                     render_sections(sections)
@@ -546,15 +552,13 @@ with tab3:
             "기타 과목명", disabled=(subject_choice_live != "기타")
         )
 
-    subject_final_live = resolve_subject(
-        subject_choice_live, custom_subject_live
-    )
+    subject_final_live = resolve_subject(subject_choice_live, custom_subject_live)
     st.caption(f"현재 과목: **{subject_final_live}**")
 
     user_text = st.text_area(
         "강의 중 중요한 문장을 그대로 입력",
         height=140,
-        placeholder="예) 이 단계는 시험에 자주 나오는 포인트다."
+        placeholder="예) 이 단계는 시험에 자주 나오는 포인트다.",
     )
 
     if st.button("족보 연결 확인"):
@@ -567,9 +571,7 @@ with tab3:
             st.error("텍스트를 입력하세요.")
             st.stop()
 
-        related = find_relevant_jokbo(
-            query, st.session_state.db, top_k=3
-        )
+        related = find_relevant_jokbo(query, st.session_state.db, top_k=3)
 
         # ✅ 족보 근거 없으면 AI 호출 스킵
         if not has_jokbo_evidence(related):
@@ -577,9 +579,7 @@ with tab3:
             st.stop()
 
         for i, r in enumerate(related):
-            with st.expander(
-                f"족보 근거 #{i+1} (유사도 {r['score']:.3f})"
-            ):
+            with st.expander(f"족보 근거 #{i+1} (유사도 {r['score']:.3f})"):
                 st.write(f"페이지 {r['content']['page']}")
                 st.write(r["content"]["text"])
 
@@ -592,14 +592,14 @@ with tab3:
             subject=subject_final_live,
             lecture_text=query,
             jokbo_ctx=jokbo_ctx,
-            mode="live"
+            mode="live",
         )
 
+        # ✅ 하드코딩 모델명 fallback 제거 (list_models 기반만 사용)
         models = st.session_state.text_models or []
-        fallback = models + ["models/gemini-1.5-flash-latest"]
 
         with st.spinner("족보 기반 분석 중..."):
-            result, used = generate_with_fallback(prompt, fallback)
+            result, used = generate_with_fallback(prompt, models)
             st.caption(f"사용 모델: {used}")
             sections = parse_ai_sections(result)
             render_sections(sections)
