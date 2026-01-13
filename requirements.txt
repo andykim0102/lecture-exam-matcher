@@ -4,4 +4,3 @@ pymupdf
 scikit-learn
 numpy
 watchdog
-streamlit-mic-recorder  # [추가] 오디오 녹음을 위한 라이브러리
