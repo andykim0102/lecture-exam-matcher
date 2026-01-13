@@ -340,7 +340,7 @@ def render_sections(sections: dict):
 with st.sidebar:
     st.title("🩺 Med-Study 상태")
 
-    api_key = st.text_input("Gemini API Key", type="password")
+    api_key = st.text_input("Gemini API Key", type="password", key="api_key_input")
 
     if api_key:
         try:
@@ -366,7 +366,7 @@ with st.sidebar:
     st.divider()
     st.caption(f"📊 학습된 족보 페이지 수: **{len(st.session_state.db)}**")
 
-    if st.button("족보 DB 초기화"):
+    if st.button("족보 DB 초기화", key="reset_db_btn"):
         st.session_state.db = []
         st.rerun()
 
@@ -383,7 +383,12 @@ with tab1:
     st.header("📂 족보 학습")
     st.info("과거 시험 족보를 학습시켜, 강의 내용과 시험 출제 포인트를 연결합니다.")
 
-    files = st.file_uploader("족보 PDF 업로드", type="pdf", accept_multiple_files=True)
+    files = st.file_uploader(
+        "족보 PDF 업로드",
+        type="pdf",
+        accept_multiple_files=True,
+        key="jokbo_pdf_uploader",
+    )
 
     col_a, col_b = st.columns([1, 2])
     with col_a:
@@ -393,11 +398,12 @@ with tab1:
             max_value=200,
             value=30,
             step=1,
+            key="max_pages_input",
         )
     with col_b:
         st.caption("데모 안정성을 위해 파일당 학습 페이지를 제한하는 것을 권장합니다.")
 
-    if st.button("📚 시험 대비 DB 구축 시작"):
+    if st.button("📚 시험 대비 DB 구축 시작", key="build_db_btn"):
         if not api_key or not st.session_state.api_key_ok:
             st.error("사이드바에서 유효한 API Key를 먼저 설정하세요.")
             st.stop()
@@ -437,17 +443,26 @@ with tab2:
     st.header("📖 강의 공부")
     st.info("강의 페이지 내용이 족보에서 어떻게 나왔는지만 확인합니다.")
 
-    # 과목 선택 + 기타 입력
+    # 과목 선택 + 기타 입력  (✅ key로 TAB3와 충돌 방지)
     c1, c2 = st.columns([1, 2])
     with c1:
-        subject_choice = st.selectbox("과목", ["해부학", "생리학", "약리학", "기타"], index=1)
+        subject_choice = st.selectbox(
+            "과목",
+            ["해부학", "생리학", "약리학", "기타"],
+            index=1,
+            key="subject_choice_tab2",
+        )
     with c2:
-        custom_subject = st.text_input("기타 과목명", disabled=(subject_choice != "기타"))
+        custom_subject = st.text_input(
+            "기타 과목명",
+            disabled=(subject_choice != "기타"),
+            key="custom_subject_tab2",
+        )
 
     subject_final = resolve_subject(subject_choice, custom_subject)
     st.caption(f"현재 과목: **{subject_final}**")
 
-    lec_file = st.file_uploader("강의록 PDF", type="pdf", key="lec")
+    lec_file = st.file_uploader("강의록 PDF", type="pdf", key="lec_pdf_uploader")
 
     if lec_file:
         if st.session_state.lecture_doc is None or st.session_state.lecture_filename != lec_file.name:
@@ -464,7 +479,7 @@ with tab2:
         with col_view:
             b1, b2, b3 = st.columns([1, 2, 1])
 
-            if b1.button("◀"):
+            if b1.button("◀", key="prev_page_btn"):
                 if st.session_state.current_page > 0:
                     st.session_state.current_page -= 1
 
@@ -473,7 +488,7 @@ with tab2:
                 unsafe_allow_html=True,
             )
 
-            if b3.button("▶"):
+            if b3.button("▶", key="next_page_btn"):
                 if st.session_state.current_page < len(doc) - 1:
                     st.session_state.current_page += 1
 
@@ -492,7 +507,7 @@ with tab2:
         with col_ai:
             st.subheader("🔎 족보 근거")
 
-            if st.button("이 페이지 분석"):
+            if st.button("이 페이지 분석", key="analyze_page_btn"):
                 if not st.session_state.db:
                     st.error("족보 DB가 없습니다.")
                     st.stop()
@@ -525,7 +540,6 @@ with tab2:
                     mode="page",
                 )
 
-                # ✅ 하드코딩 모델명 fallback 제거 (list_models 기반만 사용)
                 models = st.session_state.text_models or []
 
                 with st.spinner("족보 기반 분석 중..."):
@@ -542,14 +556,20 @@ with tab3:
     st.header("⌨️ 실시간 텍스트 분석")
     st.info("족보에 근거가 있을 때만 시험 포인트로 변환합니다.")
 
+    # ✅ TAB2와 라벨이 같아도 key로 충돌 방지
     c1, c2 = st.columns([1, 2])
     with c1:
         subject_choice_live = st.selectbox(
-            "과목", ["해부학", "생리학", "약리학", "기타"], index=1
+            "과목",
+            ["해부학", "생리학", "약리학", "기타"],
+            index=1,
+            key="subject_choice_tab3",
         )
     with c2:
         custom_subject_live = st.text_input(
-            "기타 과목명", disabled=(subject_choice_live != "기타")
+            "기타 과목명",
+            disabled=(subject_choice_live != "기타"),
+            key="custom_subject_tab3",
         )
 
     subject_final_live = resolve_subject(subject_choice_live, custom_subject_live)
@@ -559,9 +579,10 @@ with tab3:
         "강의 중 중요한 문장을 그대로 입력",
         height=140,
         placeholder="예) 이 단계는 시험에 자주 나오는 포인트다.",
+        key="live_text_area",
     )
 
-    if st.button("족보 연결 확인"):
+    if st.button("족보 연결 확인", key="live_check_btn"):
         if not st.session_state.db:
             st.error("족보 DB가 없습니다.")
             st.stop()
@@ -595,7 +616,6 @@ with tab3:
             mode="live",
         )
 
-        # ✅ 하드코딩 모델명 fallback 제거 (list_models 기반만 사용)
         models = st.session_state.text_models or []
 
         with st.spinner("족보 기반 분석 중..."):
