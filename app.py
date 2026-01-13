@@ -11,13 +11,13 @@ from sklearn.metrics.pairwise import cosine_similarity
 # 0. 페이지 설정
 # ==========================================
 st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
-st.caption("📌 흐름: (1) 족보 업로드→DB 구축  (2) 강의본 업로드→페이지 넘기며 옆에서 족보 근거 확인")
+st.caption("📌 흐름: (1) 족보 업로드→DB 구축  (2) 강의본 업로드→페이지 넘기며 옆에서 '족보가 어떻게 나왔는지' 조교 설명")
 
 # ==========================================
 # 1. 세션 상태 초기화
 # ==========================================
 if "db" not in st.session_state:
-    st.session_state.db = []  # [{"page": int, "text": str, "source": str, "embedding": list[float]}]
+    st.session_state.db = []
 
 if "api_key" not in st.session_state:
     st.session_state.api_key = None
@@ -40,8 +40,15 @@ if "lecture_filename" not in st.session_state:
 if "current_page" not in st.session_state:
     st.session_state.current_page = 0
 
+# 페이지별 캐시(중복 호출 방지)
 if "last_page_sig" not in st.session_state:
-    st.session_state.last_page_sig = None  # 페이지 텍스트 hash로 중복 검색 방지
+    st.session_state.last_page_sig = None
+if "last_related" not in st.session_state:
+    st.session_state.last_related = []
+if "last_ai_sig" not in st.session_state:
+    st.session_state.last_ai_sig = None
+if "last_ai_text" not in st.session_state:
+    st.session_state.last_ai_text = ""
 
 # ==========================================
 # 2. 설정값
@@ -62,8 +69,7 @@ def ensure_configured():
 
 
 def extract_text_from_pdf(uploaded_file):
-    """PDF를 텍스트로 변환 (fitz 사용)"""
-    data = uploaded_file.getvalue()  # ✅ UploadedFile read() 재사용 이슈 방지
+    data = uploaded_file.getvalue()
     doc = fitz.open(stream=data, filetype="pdf")
     pages = []
     for i, page in enumerate(doc):
@@ -74,12 +80,10 @@ def extract_text_from_pdf(uploaded_file):
 
 
 def get_embedding(text: str):
-    """임베딩 생성 (가능하면 text-embedding-004, 아니면 embedding-001)"""
     text = (text or "").strip()
     if not text:
         return []
-
-    text = text[:12000]  # 데모 안정성
+    text = text[:12000]
     ensure_configured()
 
     try:
@@ -100,10 +104,8 @@ def get_embedding(text: str):
 
 
 def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
-    """유사도 검색"""
     if not db:
         return []
-
     query_emb = get_embedding(query_text)
     if not query_emb:
         return []
@@ -119,7 +121,7 @@ def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
 
 
 # ==========================================
-# 4. (옵션) AI 생성 – 필요할 때만
+# 4. AI (조교 설명)
 # ==========================================
 @st.cache_data(show_spinner=False)
 def list_text_models(api_key: str):
@@ -158,17 +160,48 @@ def generate_with_fallback(prompt: str, model_names: list[str]):
     raise last_err
 
 
-def build_simple_ai_prompt(lecture_text: str, jokbo_ctx: str):
-    """수업 중 빠르게 '족보가 어떻게 나왔는지'만 간단 요약 (옵션)"""
-    return f"""
-너는 의대 시험 조교다.
-아래 [관련 족보 발췌]를 근거로만, 강의 내용이 시험에서 어떤 식으로 나왔는지 짧게 정리하라.
-추측 금지. 족보에 없는 내용 생성 금지.
+def build_ta_explain_prompt(lecture_text: str, related: list[dict]) -> str:
+    """
+    목표: '조교가 옆에서 설명' 형태로
+    - 강의에서 지금 뭐가 핵심인지
+    - 족보에서 어떤 방식으로 나왔는지
+    - 근거(족보 문장) 2개 이상
+    """
+    # 족보 근거 상위 3개만 넣어 속도/품질 균형
+    ctx_lines = []
+    for r in related[:3]:
+        c = r["content"]
+        src = c.get("source", "")
+        pg = c.get("page", "?")
+        txt = (c.get("text") or "")[:450]
+        ctx_lines.append(f"- [{src} p{pg} | sim={r['score']:.3f}] {txt}")
 
-형식:
-- 한줄 요약(족보에서 어떤 포인트로 나왔는지)
-- 키워드 5개
-- 족보 문장 근거 2개 (짧게 인용)
+    jokbo_ctx = "\n".join(ctx_lines)
+
+    return f"""
+너는 의대 조교다. 학생이 강의를 듣는 중이며, 지금 보고 있는 강의 페이지가 '족보에 나왔던 내용인지' 빠르게 잡아주면 된다.
+
+중요 규칙:
+- 아래 [관련 족보 발췌]를 근거로만 말해라. (추측/창작/상식 설명 금지)
+- 강의 텍스트 자체를 길게 재진술하지 말고, 시험 포인트 중심으로만.
+- 근거는 반드시 '족보 문장/구절'로 2개 이상 짧게 인용해라.
+
+출력 형식(반드시 지켜라):
+[조교 한줄 코멘트]
+- (한 문장)
+
+[족보에서 나온 포인트]
+- 포인트 3개 (짧게)
+
+[족보에서 실제로 나온 방식]
+- 어떤 형태(단답/객관식/서술/비교/기전/정의 등)인지 1~2줄
+
+[근거 인용]
+- "..." (출처: 파일명 p페이지)
+- "..." (출처: 파일명 p페이지)
+
+[학생 액션]
+- 지금 외워야 할 키워드 5개 (콤마로)
 
 [강의 페이지 텍스트]
 {lecture_text}
@@ -179,7 +212,7 @@ def build_simple_ai_prompt(lecture_text: str, jokbo_ctx: str):
 
 
 # ==========================================
-# 5. UI 컴포넌트
+# 5. UI 렌더
 # ==========================================
 def render_jokbo_cards(related: list[dict]):
     st.markdown("### 📌 이 페이지와 유사한 족보 근거")
@@ -197,8 +230,44 @@ def render_jokbo_cards(related: list[dict]):
         title = f"#{i+1}  유사도 {score:.3f} · {c.get('source','(unknown)')} · p{c.get('page','?')}"
         with st.container(border=True):
             st.markdown(f"**{title}**")
-            snippet = (c.get("text") or "").strip().replace("\n", " ")
-            st.write(snippet[:600] + ("…" if len(snippet) > 600 else ""))
+            snippet = (c.get("text") or "").strip()
+            snippet = snippet[:900]
+            st.write(snippet + ("…" if len((c.get("text") or "")) > 900 else ""))
+
+
+def render_ta_panel(page_text: str, related: list[dict], auto_ai: bool):
+    st.markdown("### 🧑‍🏫 조교 설명")
+
+    if not has_jokbo_evidence(related):
+        st.info("이 페이지는 족보 근거가 뚜렷하지 않아서 조교 설명을 생략했어요.")
+        return
+
+    if not auto_ai:
+        st.caption("자동 조교 설명이 꺼져 있어요. 토글을 켜면 페이지 넘길 때마다 자동으로 설명해줘요.")
+        return
+
+    if not st.session_state.api_key_ok or not st.session_state.get("api_key"):
+        st.warning("조교 설명(AI)을 쓰려면 사이드바에 Gemini API Key를 입력해야 해요.")
+        return
+
+    # 페이지 텍스트 + top1 유사도 기반 시그니처로 중복 생성 방지
+    sig = (hash(page_text), related[0]["content"].get("source"), related[0]["content"].get("page"))
+    if sig != st.session_state.last_ai_sig:
+        prompt = build_ta_explain_prompt(page_text, related)
+        models = st.session_state.text_models or []
+        with st.spinner("조교가 족보 근거를 바탕으로 설명 중..."):
+            try:
+                result, used = generate_with_fallback(prompt, models)
+                st.session_state.last_ai_sig = sig
+                st.session_state.last_ai_text = result
+                st.caption(f"사용 모델: {used}")
+            except Exception as e:
+                st.error(f"AI 설명 생성 실패: {e}")
+                return
+    else:
+        st.caption("사용 모델: (캐시)")
+
+    st.write(st.session_state.last_ai_text)
 
 
 # ==========================================
@@ -208,12 +277,10 @@ with st.sidebar:
     st.title("🩺 Med-Study")
 
     api_key = st.text_input("Gemini API Key", type="password", key="api_key_input")
-
     if api_key:
         try:
             st.session_state.api_key = api_key
             genai.configure(api_key=api_key)
-
             available_models = list_text_models(api_key)
             if not available_models:
                 st.session_state.api_key_ok = False
@@ -231,19 +298,18 @@ with st.sidebar:
     st.divider()
     st.caption(f"📚 학습된 족보 페이지 수: **{len(st.session_state.db)}**")
 
-    colx, coly = st.columns(2)
-    with colx:
-        if st.button("족보 DB 초기화", key="reset_db_btn"):
-            st.session_state.db = []
-            st.session_state.last_page_sig = None
-            st.rerun()
-    with coly:
-        st.caption(f"임계값: **{JOKBO_THRESHOLD:.2f}**")
+    if st.button("족보 DB 초기화", key="reset_db_btn"):
+        st.session_state.db = []
+        st.session_state.last_page_sig = None
+        st.session_state.last_related = []
+        st.session_state.last_ai_sig = None
+        st.session_state.last_ai_text = ""
+        st.rerun()
 
 # ==========================================
 # 7. 메인 탭
 # ==========================================
-tab1, tab2 = st.tabs(["📂 1) 족보 업로드/학습", "📖 2) 강의본 보며 족보 확인"])
+tab1, tab2 = st.tabs(["📂 1) 족보 업로드/학습", "📖 2) 강의본 보며 '조교 설명 + 족보 근거'"])
 
 # ==================================================
 # TAB 1 — 족보 업로드/학습
@@ -270,10 +336,10 @@ with tab1:
             key="max_pages_input",
         )
     with col_b:
-        st.caption("너무 많이 학습하면 임베딩 호출이 많아져 느려질 수 있어요. (데모는 30~80 추천)")
+        st.caption("너무 많이 학습하면 임베딩 호출이 많아져 느릴 수 있어요. (데모는 30~80 추천)")
 
     if st.button("📚 족보 DB 구축 시작", key="build_db_btn"):
-        if not api_key or not st.session_state.api_key_ok:
+        if not st.session_state.api_key_ok or not st.session_state.get("api_key"):
             st.error("사이드바에서 유효한 API Key를 먼저 설정하세요.")
             st.stop()
         if not files:
@@ -306,23 +372,22 @@ with tab1:
         st.session_state.db.extend(new_db)
         status.text("✅ 학습 완료")
         st.success(f"총 {len(new_db)} 페이지(텍스트 있는 페이지만) 학습 완료")
-        st.info("👉 다음 탭에서 강의본을 올리고, 페이지 넘기면서 오른쪽에서 바로 족보 근거를 확인하세요.")
-
+        st.info("👉 다음 탭에서 강의본을 올리고, 페이지 넘기면서 오른쪽에서 조교 설명 + 족보 근거를 확인하세요.")
 
 # ==================================================
-# TAB 2 — 강의본 보며 족보 확인 (핵심)
+# TAB 2 — 강의본 보며 조교 설명 + 족보 근거 (핵심)
 # ==================================================
 with tab2:
-    st.header("📖 2) 강의본 보며 족보 확인")
-    st.info("강의본을 페이지 넘기면, 오른쪽에 '족보가 어떻게 나왔는지' 근거가 자동으로 뜹니다.")
+    st.header("📖 2) 강의본 보며 '조교 설명 + 족보 근거'")
+    st.info("강의본을 페이지 넘기면, 오른쪽에 조교 설명이 먼저 뜨고 그 아래에 족보 근거가 표시됩니다.")
 
     if not st.session_state.db:
         st.warning("먼저 1번 탭에서 **족보 DB를 구축**하세요.")
 
     lec_file = st.file_uploader("강의본 PDF 업로드", type="pdf", key="lec_pdf_uploader")
 
-    # 옵션: AI로 요약까지(느릴 수 있음)
-    ai_toggle = st.toggle("옵션: AI로 '족보 포인트' 짧게 요약(느릴 수 있음)", value=False, key="ai_toggle")
+    # ✅ 여기서 AI가 '메인' (기본 ON)
+    auto_ai = st.toggle("자동 조교 설명(페이지 넘길 때마다 갱신)", value=True, key="auto_ai_toggle")
 
     if lec_file:
         if st.session_state.lecture_doc is None or st.session_state.lecture_filename != lec_file.name:
@@ -330,12 +395,15 @@ with tab2:
             st.session_state.lecture_doc = fitz.open(stream=data, filetype="pdf")
             st.session_state.lecture_filename = lec_file.name
             st.session_state.current_page = 0
-            st.session_state.last_page_sig = None  # 새 파일이면 캐시 리셋
+            st.session_state.last_page_sig = None
+            st.session_state.last_related = []
+            st.session_state.last_ai_sig = None
+            st.session_state.last_ai_text = ""
 
         doc = st.session_state.lecture_doc
         col_view, col_right = st.columns([6, 4])
 
-        # ---------- LEFT: PDF Viewer ----------
+        # ---------- LEFT ----------
         with col_view:
             nav1, nav2, nav3 = st.columns([1, 2, 1])
 
@@ -363,39 +431,26 @@ with tab2:
             if not page_text:
                 st.warning("이 페이지에는 텍스트가 없습니다. (스캔 PDF면 OCR이 필요할 수 있어요)")
 
-        # ---------- RIGHT: Jokbo matches (AUTO) ----------
+        # ---------- RIGHT ----------
         with col_right:
             if not st.session_state.db:
                 st.info("족보 DB가 없어서 비교할 수 없습니다.")
                 st.stop()
 
-            # ✅ 자동 검색: 페이지 텍스트가 바뀌었을 때만
-            sig = hash(page_text) if page_text else None
+            # 페이지가 바뀔 때만 검색
+            page_sig = hash(page_text) if page_text else None
+            if page_text and page_sig != st.session_state.last_page_sig:
+                st.session_state.last_page_sig = page_sig
+                st.session_state.last_related = find_relevant_jokbo(page_text, st.session_state.db, top_k=5)
 
-            if page_text and sig != st.session_state.last_page_sig:
-                st.session_state.last_page_sig = sig
-                related = find_relevant_jokbo(page_text, st.session_state.db, top_k=5)
-                st.session_state["last_related"] = related
-            else:
-                related = st.session_state.get("last_related", [])
+            related = st.session_state.last_related
 
+            # 1) 조교 설명(메인)
+            render_ta_panel(page_text, related, auto_ai)
+
+            st.divider()
+
+            # 2) 족보 근거(서브)
             render_jokbo_cards(related)
-
-            # (옵션) AI 요약
-            if ai_toggle and has_jokbo_evidence(related):
-                if not api_key or not st.session_state.api_key_ok:
-                    st.warning("AI 요약을 쓰려면 사이드바에 API Key를 넣어야 합니다.")
-                else:
-                    jokbo_ctx = "\n".join(
-                        f"- ({r['content']['source']} p{r['content']['page']}) {r['content']['text'][:300]}"
-                        for r in related[:3]
-                    )
-                    prompt = build_simple_ai_prompt(page_text, jokbo_ctx)
-                    models = st.session_state.text_models or []
-                    with st.spinner("AI 요약 중..."):
-                        result, used = generate_with_fallback(prompt, models)
-                        st.caption(f"사용 모델: {used}")
-                        st.markdown("### 🧠 AI 요약(옵션)")
-                        st.write(result)
     else:
-        st.caption("강의본 PDF를 올리면, 왼쪽은 강의본/오른쪽은 족보 근거가 자동으로 표시됩니다.")
+        st.caption("강의본 PDF를 올리면, 오른쪽에 조교 설명(자동) + 족보 근거가 표시됩니다.")
