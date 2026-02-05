@@ -726,7 +726,10 @@ with tab2:
                     canvas_key = f"canvas_{st.session_state.lecture_filename}_{st.session_state.current_page}"
                     initial_drawing = st.session_state.drawings.get(canvas_key)
                     
-                    # 항상 캔버스 표시 (이미지 객체 전달)
+                    # 🖼️ 이미지를 Base64로 변환하여 전달 (Patch 적용됨)
+                    bg_image_url = pil_to_base64(pil_image)
+
+                    # 항상 캔버스 표시
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.3)",
                         stroke_width=stroke_width,
