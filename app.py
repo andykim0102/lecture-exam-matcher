@@ -251,6 +251,16 @@ def logout():
 # ==========================================
 # 3. Helpers & Data Logic
 # ==========================================
+def format_jokbo_text(text):
+    """
+    족보 텍스트에서 문항 번호(예: 31., 32.)를 찾아 줄바꿈과 볼드체로 가독성을 높임.
+    """
+    if not text: return ""
+    # 숫자. 패턴 뒤에 공백이 오는 경우를 찾아서 앞뒤로 줄바꿈 추가 및 볼드 처리
+    # 예: "31. " -> "\n\n**31.** "
+    formatted = re.sub(r'(?<!\d)(\d+\.)\s+', r'\n\n**\1** ', text)
+    return formatted.strip()
+
 def rename_subject(old_name, new_name):
     count = 0
     for item in st.session_state.db:
@@ -403,15 +413,23 @@ def build_page_analysis_prompt(lecture_text, related_jokbo, subject):
     {lecture_text[:1500]}
     
     다음 3가지 섹션으로 나누어 출력하라. 각 섹션 헤더를 정확히 지킬 것.
+    내용은 마크다운(Markdown) 형식을 사용하여 가독성 있게 작성할 것.
     
     [SECTION: DIRECTION]
-    이 페이지 공부 방향성을 한 문단으로 요약. (어떤 키워드가 족보에 자주 나오는지 등)
+    이 페이지 공부 방향성을 한 문단으로 요약. 
+    - **핵심 키워드**: ...
+    - **암기 우선순위**: ...
     
     [SECTION: TWIN_Q]
-    위 족보 문제와 유사한 '쌍둥이 문제(변형 문제)'를 1개 만들어라. (객관식 또는 단답형)
+    위 족보 문제와 유사한 '쌍둥이 문제(변형 문제)'를 1개 만들어라.
+    **Q. 문제 내용...**
+    1) 보기 ...
+    2) 보기 ...
     
     [SECTION: EXPLANATION]
-    위 쌍둥이 문제의 정답과, 왜 그것이 답인지에 대한 족보 기반 해설.
+    **정답: ...**
+    
+    > **해설**: 위 쌍둥이 문제의 정답 이유와 관련 이론 설명.
     """
 
 def build_chat_prompt(history: list, context_text: str, related_jokbo: list, question: str):
@@ -651,8 +669,8 @@ with tab2:
             # 1. 왼쪽: PDF 뷰어 (with 필기 모드)
             with col_view:
                 with st.container(border=True):
-                    # 네비게이션 & 필기 모드 토글
-                    c1, c2, c3, c4 = st.columns([1, 2, 1, 1.5])
+                    # 네비게이션 & 툴바
+                    c1, c2, c3 = st.columns([1, 2, 1])
                     with c1:
                         if st.button("◀", use_container_width=True):
                             if st.session_state.current_page > 0: 
@@ -665,8 +683,19 @@ with tab2:
                             if st.session_state.current_page < len(doc)-1: 
                                 st.session_state.current_page += 1
                                 st.session_state.chat_history = [] 
-                    with c4:
-                        use_annotation = st.toggle("🖊️ 필기 모드", value=False)
+                    
+                    # 캔버스 툴바 (항상 표시)
+                    col_tool1, col_tool2, col_tool3 = st.columns([1, 1, 1])
+                    with col_tool1:
+                        drawing_mode = st.selectbox(
+                            "도구", ("freedraw", "line", "rect", "circle", "transform"),
+                            label_visibility="collapsed",
+                            index=0
+                        )
+                    with col_tool2:
+                        stroke_width = st.slider("굵기", 1, 25, 3, label_visibility="collapsed")
+                    with col_tool3:
+                        stroke_color = st.color_picker("색상", "#FF0000", label_visibility="collapsed")
                     
                     # 이미지 렌더링
                     page = doc.load_page(st.session_state.current_page)
@@ -674,46 +703,30 @@ with tab2:
                     pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     p_text = page.get_text() or ""
                     
-                    if use_annotation:
-                        # 캔버스 툴바 (색상, 굵기)
-                        with st.expander("🎨 펜 설정", expanded=True):
-                            col_tool1, col_tool2, col_tool3 = st.columns([1, 1, 1])
-                            with col_tool1:
-                                drawing_mode = st.selectbox(
-                                    "도구", ("freedraw", "line", "rect", "circle", "transform"),
-                                    label_visibility="collapsed"
-                                )
-                            with col_tool2:
-                                stroke_width = st.slider("굵기", 1, 25, 3, label_visibility="collapsed")
-                            with col_tool3:
-                                stroke_color = st.color_picker("색상", "#FF0000", label_visibility="collapsed")
-                        
-                        # 캔버스 ID 생성 (페이지별 고유)
-                        canvas_key = f"canvas_{st.session_state.lecture_filename}_{st.session_state.current_page}"
-                        initial_drawing = st.session_state.drawings.get(canvas_key)
-                        
-                        # 🖼️ 이미지를 Base64로 변환하여 전달 (Patch 적용됨)
-                        bg_image_url = pil_to_base64(pil_image)
+                    # 캔버스 ID 생성 (페이지별 고유)
+                    canvas_key = f"canvas_{st.session_state.lecture_filename}_{st.session_state.current_page}"
+                    initial_drawing = st.session_state.drawings.get(canvas_key)
+                    
+                    # 🖼️ 이미지를 Base64로 변환하여 전달 (Patch 적용됨)
+                    bg_image_url = pil_to_base64(pil_image)
 
-                        canvas_result = st_canvas(
-                            fill_color="rgba(255, 165, 0, 0.3)",
-                            stroke_width=stroke_width,
-                            stroke_color=stroke_color,
-                            background_image=bg_image_url,
-                            update_streamlit=True,
-                            height=pil_image.height,
-                            width=pil_image.width,
-                            drawing_mode=drawing_mode,
-                            key=canvas_key,
-                            initial_drawing=initial_drawing
-                        )
-                        
-                        # 필기 데이터 저장 (페이지 전환 후에도 유지)
-                        if canvas_result.json_data is not None:
-                            st.session_state.drawings[canvas_key] = canvas_result.json_data
-                            
-                    else:
-                        st.image(pil_image, use_container_width=True)
+                    # 항상 캔버스 표시
+                    canvas_result = st_canvas(
+                        fill_color="rgba(255, 165, 0, 0.3)",
+                        stroke_width=stroke_width,
+                        stroke_color=stroke_color,
+                        background_image=bg_image_url,
+                        update_streamlit=True,
+                        height=pil_image.height,
+                        width=pil_image.width,
+                        drawing_mode=drawing_mode,
+                        key=canvas_key,
+                        initial_drawing=initial_drawing
+                    )
+                    
+                    # 필기 데이터 저장 (페이지 전환 후에도 유지)
+                    if canvas_result.json_data is not None:
+                        st.session_state.drawings[canvas_key] = canvas_result.json_data
 
             # 2. 오른쪽: AI 조교 (분석 & 채팅)
             with col_ai:
@@ -761,11 +774,13 @@ with tab2:
                                     for r in rel[:2]:
                                         score = r['score']
                                         src = r['content'].get('source', 'Unknown')
-                                        txt = r['content'].get('text', '')[:200]
+                                        txt = r['content'].get('text', '')[:300]
+                                        # 포맷팅 적용
+                                        formatted_txt = format_jokbo_text(txt)
                                         st.markdown(f"""
                                         <div class="jokbo-item">
                                             <div class="jokbo-source">출처: {src} (유사도 {score:.2f})</div>
-                                            {txt}...
+                                            {formatted_txt}...
                                         </div>
                                         """, unsafe_allow_html=True)
                                     
@@ -792,7 +807,7 @@ with tab2:
                                     if isinstance(res_dict, dict):
                                         # 공부 방향성 (Expander)
                                         with st.expander("🧭 공부 방향성 보기"):
-                                            st.info(res_dict.get("DIRECTION", "분석 중..."))
+                                            st.markdown(res_dict.get("DIRECTION", "분석 중..."))
                                         
                                         # 쌍둥이 문제 (Expander)
                                         with st.expander("🧩 쌍둥이 문제 만들기"):
