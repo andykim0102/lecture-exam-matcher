@@ -8,6 +8,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
+from streamlit_drawable_canvas import st_canvas  # ✏️ 필기 기능을 위한 라이브러리
 
 # ==========================================
 # 0. Page config & Custom CSS
@@ -18,7 +19,7 @@ st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
 st.markdown("""
 <style>
     /* 1. 강제 라이트 모드 적용 */
-    .stApp { background-color: #f8f9fa; } /* 배경을 아주 연한 회색으로 변경하여 카드와 대비 */
+    .stApp { background-color: #f8f9fa; } 
     h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown { color: #1c1c1e !important; }
     .gray-text, .text-sm, .login-desc, small { color: #8e8e93 !important; }
     
@@ -38,7 +39,7 @@ st.markdown("""
     .stTabs [data-baseweb="tab"] { height: 40px; border-radius: 20px; padding: 0 20px; background-color: #ffffff; border: 1px solid #e0e0e0; font-weight: 600; color: #8e8e93 !important; flex-grow: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
     .stTabs [aria-selected="true"] { background-color: #007aff !important; color: #ffffff !important; box-shadow: 0 4px 8px rgba(0,122,255,0.2); border: none; }
 
-    /* 5. 카드 컨테이너 (디자인 강화) */
+    /* 5. 카드 컨테이너 */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         border-radius: 20px; 
         border: 1px solid #edf2f7; 
@@ -71,7 +72,7 @@ st.markdown("""
     
     /* 9. 족보 아이템 스타일 */
     .jokbo-item {
-        background-color: #fffde7; /* 아주 연한 노랑 */
+        background-color: #fffde7;
         border: 1px solid #fff59d;
         border-radius: 12px;
         padding: 16px;
@@ -102,6 +103,9 @@ st.markdown("""
         gap: 8px;
     }
     .sidebar-icon { font-size: 1.1rem; }
+    
+    /* 11. 캔버스 툴바 스타일 */
+    div[data-testid="stExpander"] { background-color: white; border-radius: 12px; border: 1px solid #eee; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -168,6 +172,10 @@ if "last_ai_text" not in st.session_state:
 
 if "last_related" not in st.session_state:
     st.session_state.last_related = []
+
+# ✏️ [NEW] 필기 데이터 저장용 (페이지별 저장)
+if "drawings" not in st.session_state:
+    st.session_state.drawings = {}
 
 
 # ==========================================
@@ -555,7 +563,7 @@ with tab1:
                                     st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
                                     st.markdown(f"<span class='gray-text'>🕒 최근 업데이트: {subj_data['last_updated']}</span>", unsafe_allow_html=True)
 
-# --- TAB 2: 강의 분석 (UI 개선 & Chat) ---
+# --- TAB 2: 강의 분석 (UI 개선 & Chat & Canvas) ---
 with tab2:
     if st.session_state.t2_selected_subject is None:
         st.markdown("#### 📖 학습할 과목을 선택하세요")
@@ -596,24 +604,69 @@ with tab2:
             # 메인 레이아웃: 왼쪽(뷰어) / 오른쪽(AI)
             col_view, col_ai = st.columns([1.8, 1.2])
             
-            # 1. 왼쪽: PDF 뷰어
+            # 1. 왼쪽: PDF 뷰어 (with 필기 모드)
             with col_view:
                 with st.container(border=True):
-                    c1, c2, c3 = st.columns([1, 3, 1])
-                    if c1.button("◀ 이전", use_container_width=True):
-                        if st.session_state.current_page > 0: 
-                            st.session_state.current_page -= 1
-                            st.session_state.chat_history = [] 
-                    c2.markdown(f"<div style='text-align:center; font-weight:bold; padding-top:8px;'>Page {st.session_state.current_page+1} / {len(doc)}</div>", unsafe_allow_html=True)
-                    if c3.button("다음 ▶", use_container_width=True):
-                        if st.session_state.current_page < len(doc)-1: 
-                            st.session_state.current_page += 1
-                            st.session_state.chat_history = [] 
+                    # 네비게이션 & 필기 모드 토글
+                    c1, c2, c3, c4 = st.columns([1, 2, 1, 1.5])
+                    with c1:
+                        if st.button("◀", use_container_width=True):
+                            if st.session_state.current_page > 0: 
+                                st.session_state.current_page -= 1
+                                st.session_state.chat_history = [] 
+                    with c2:
+                        st.markdown(f"<div style='text-align:center; font-weight:bold; padding-top:8px;'>Page {st.session_state.current_page+1} / {len(doc)}</div>", unsafe_allow_html=True)
+                    with c3:
+                        if st.button("▶", use_container_width=True):
+                            if st.session_state.current_page < len(doc)-1: 
+                                st.session_state.current_page += 1
+                                st.session_state.chat_history = [] 
+                    with c4:
+                        use_annotation = st.toggle("🖊️ 필기 모드", value=False)
                     
+                    # 이미지 렌더링
                     page = doc.load_page(st.session_state.current_page)
-                    pix = page.get_pixmap(dpi=180) 
-                    st.image(Image.frombytes("RGB", [pix.width, pix.height], pix.samples), use_container_width=True)
+                    pix = page.get_pixmap(dpi=150) # 화면 표시용 적정 DPI
+                    pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     p_text = page.get_text() or ""
+                    
+                    if use_annotation:
+                        # 캔버스 툴바 (색상, 굵기)
+                        with st.expander("🎨 펜 설정", expanded=True):
+                            col_tool1, col_tool2, col_tool3 = st.columns([1, 1, 1])
+                            with col_tool1:
+                                drawing_mode = st.selectbox(
+                                    "도구", ("freedraw", "line", "rect", "circle", "transform"),
+                                    label_visibility="collapsed"
+                                )
+                            with col_tool2:
+                                stroke_width = st.slider("굵기", 1, 25, 3, label_visibility="collapsed")
+                            with col_tool3:
+                                stroke_color = st.color_picker("색상", "#FF0000", label_visibility="collapsed")
+                        
+                        # 캔버스 ID 생성 (페이지별 고유)
+                        canvas_key = f"canvas_{st.session_state.lecture_filename}_{st.session_state.current_page}"
+                        initial_drawing = st.session_state.drawings.get(canvas_key)
+
+                        canvas_result = st_canvas(
+                            fill_color="rgba(255, 165, 0, 0.3)",
+                            stroke_width=stroke_width,
+                            stroke_color=stroke_color,
+                            background_image=pil_image,
+                            update_streamlit=True,
+                            height=pil_image.height,
+                            width=pil_image.width,
+                            drawing_mode=drawing_mode,
+                            key=canvas_key,
+                            initial_drawing=initial_drawing
+                        )
+                        
+                        # 필기 데이터 저장 (페이지 전환 후에도 유지)
+                        if canvas_result.json_data is not None:
+                            st.session_state.drawings[canvas_key] = canvas_result.json_data
+                            
+                    else:
+                        st.image(pil_image, use_container_width=True)
 
             # 2. 오른쪽: AI 조교 (분석 & 채팅)
             with col_ai:
@@ -656,7 +709,7 @@ with tab2:
                             # 2. 일반 페이지 분석
                             else:
                                 if has_jokbo_evidence(rel):
-                                    # 섹션 1: 족보 문항 원문 (가장 중요)
+                                    # 섹션 1: 족보 문항 원문 (가장 중요) - 항상 표시
                                     st.markdown("##### 🔥 관련 족보 문항")
                                     for r in rel[:2]:
                                         score = r['score']
@@ -687,17 +740,18 @@ with tab2:
                                             st.session_state.last_ai_text = parsed
                                             st.session_state.last_ai_sig = aisig
                                     
-                                    # 섹션 2: 공부 방향성
+                                    # 섹션 2, 3, 4: 심화 분석 (접기/펼치기)
                                     res_dict = st.session_state.last_ai_text
                                     if isinstance(res_dict, dict):
-                                        st.markdown("##### 🧭 공부 방향성")
-                                        st.info(res_dict.get("DIRECTION", "분석 중..."))
+                                        # 공부 방향성 (Expander)
+                                        with st.expander("🧭 공부 방향성 보기"):
+                                            st.info(res_dict.get("DIRECTION", "분석 중..."))
                                         
-                                        # 섹션 3: 쌍둥이 문제 (확장)
+                                        # 쌍둥이 문제 (Expander)
                                         with st.expander("🧩 쌍둥이 문제 만들기"):
                                             st.markdown(res_dict.get("TWIN_Q", "생성 중..."))
                                             
-                                        # 섹션 4: 해설 (확장)
+                                        # 해설 (Expander)
                                         with st.expander("✅ 해설 및 정답"):
                                             st.markdown(res_dict.get("EXPLANATION", "생성 중..."))
                                     else:
