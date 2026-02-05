@@ -18,7 +18,7 @@ st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
 st.markdown("""
 <style>
     /* 1. 강제 라이트 모드 적용 */
-    .stApp { background-color: #ffffff; }
+    .stApp { background-color: #f8f9fa; } /* 배경을 아주 연한 회색으로 변경하여 카드와 대비 */
     h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown { color: #1c1c1e !important; }
     .gray-text, .text-sm, .login-desc, small { color: #8e8e93 !important; }
     
@@ -34,31 +34,74 @@ st.markdown("""
     .block-container { padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1400px; }
 
     /* 4. 탭 스타일링 */
-    .stTabs [data-baseweb="tab-list"] { gap: 0px; background-color: #f2f2f7; padding: 4px; border-radius: 10px; margin-bottom: 25px; }
-    .stTabs [data-baseweb="tab"] { height: 36px; border-radius: 7px; padding: 0 20px; background-color: transparent; border: none; font-weight: 500; color: #8e8e93 !important; flex-grow: 1; }
-    .stTabs [aria-selected="true"] { background-color: #ffffff !important; color: #000000 !important; box-shadow: 0 2px 4px rgba(0,0,0,0.08); font-weight: 600; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; padding: 4px; border-radius: 10px; margin-bottom: 25px; }
+    .stTabs [data-baseweb="tab"] { height: 40px; border-radius: 20px; padding: 0 20px; background-color: #ffffff; border: 1px solid #e0e0e0; font-weight: 600; color: #8e8e93 !important; flex-grow: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+    .stTabs [aria-selected="true"] { background-color: #007aff !important; color: #ffffff !important; box-shadow: 0 4px 8px rgba(0,122,255,0.2); border: none; }
 
-    /* 5. 카드 컨테이너 */
-    div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"] {
-        border-radius: 16px; border: 1px solid #f0f0f0; box-shadow: 0 4px 20px rgba(0,0,0,0.03); background-color: white;
+    /* 5. 카드 컨테이너 (디자인 강화) */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 20px; 
+        border: 1px solid #edf2f7; 
+        box-shadow: 0 4px 20px rgba(0,0,0,0.03); 
+        background-color: white;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 30px rgba(0,0,0,0.06);
+        border-color: #007aff;
     }
 
     /* 6. 버튼 스타일 */
-    div.stButton > button { border-radius: 10px; font-weight: 600; border: none; box-shadow: none; background-color: #f2f2f7; transition: all 0.2s; }
+    div.stButton > button { border-radius: 12px; font-weight: 600; border: none; box-shadow: none; background-color: #f2f2f7; transition: all 0.2s; height: 3rem; }
     div.stButton > button:hover { background-color: #e5e5ea; transform: scale(0.98); }
-    div.stButton > button[kind="primary"] { background-color: #007aff; }
-    div.stButton > button[kind="primary"]:hover { background-color: #0062cc; }
+    div.stButton > button[kind="primary"] { background-color: #007aff; box-shadow: 0 4px 10px rgba(0,122,255,0.2); }
+    div.stButton > button[kind="primary"]:hover { background-color: #0062cc; box-shadow: 0 6px 14px rgba(0,122,255,0.3); }
 
     /* 7. 로그인 & 기타 */
     .login-logo { font-size: 5rem; margin-bottom: 10px; animation: bounce 2s infinite; }
     @keyframes bounce { 0%, 20%, 50%, 80%, 100% {transform: translateY(0);} 40% {transform: translateY(-20px);} 60% {transform: translateY(-10px);} }
     .text-bold { font-weight: 700; color: #1c1c1e !important; }
-    div[data-testid="stFileUploader"] { padding: 15px; border: 1px dashed #d1d1d6; border-radius: 12px; }
+    div[data-testid="stFileUploader"] { padding: 20px; border: 2px dashed #d1d1d6; border-radius: 16px; background-color: #fafafa; }
     div[data-baseweb="toast"] div { color: #ffffff !important; }
     
     /* 8. 채팅 메시지 스타일 */
-    .stChatMessage { background-color: #f9f9f9; border-radius: 10px; padding: 10px; margin-bottom: 5px; }
-    div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; }
+    .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
+    div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
+    
+    /* 9. 족보 아이템 스타일 */
+    .jokbo-item {
+        background-color: #fffde7; /* 아주 연한 노랑 */
+        border: 1px solid #fff59d;
+        border-radius: 12px;
+        padding: 16px;
+        margin-bottom: 12px;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+    }
+    .jokbo-source {
+        font-size: 0.8rem;
+        color: #f57f17;
+        margin-bottom: 6px;
+        font-weight: 800;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+    
+    /* 10. 사이드바 과목 리스트 스타일 */
+    .sidebar-subject {
+        padding: 10px 15px;
+        background-color: white;
+        border-radius: 10px;
+        margin-bottom: 8px;
+        font-weight: 600;
+        color: #333;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        border: 1px solid #f0f0f0;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .sidebar-icon { font-size: 1.1rem; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -278,34 +321,56 @@ def transcribe_audio_gemini(audio_bytes, api_key):
         st.error(f"음성 인식 실패: {e}")
         return None
 
-# Prompts
-def build_ta_prompt(lecture_text: str, related: list[dict], subject: str):
-    ctx = "\n".join([f"- [{r['content']['source']} p{r['content']['page']}] {r['content']['text'][:400]}" for r in related[:3]])
+# --- New Prompts for Specialized Analysis ---
+
+def build_overview_prompt(first_page_text, subject):
+    """강의록 첫 페이지용: 전체 공부 방향성 제시"""
     return f"""
-    당신은 의대 조교입니다. 학생이 공부 중인 강의 내용과 관련된 족보(기출) 내용을 바탕으로 핵심을 짚어주세요.
-    과목: {subject}
-    [관련 족보 내용] {ctx}
-    [현재 강의 내용] {lecture_text}
+    너는 의대 수석 조교다. 지금 학생이 '{subject}' 강의록의 첫 페이지(표지/목차)를 보고 있다.
+    이 강의록 전체를 공부할 때 어떤 마음가짐과 전략을 가져야 하는지, 족보(기출) 패턴을 고려하여 조언해라.
+    
+    [강의록 첫 페이지 내용]
+    {first_page_text[:1500]}
+    
     출력 형식:
-    1. 💡 한줄 요약: (족보와 연관된 핵심 내용 한 문장)
-    2. 🎯 출제 포인트 TOP 3: (짧게)
-    3. 📝 암기 키워드: (콤마로 구분)
+    1. 🏁 이 강의의 핵심 목표 (한 줄)
+    2. 🚩 족보 기반 공부 전략 (3가지 포인트)
+    3. ⚠️ 주의해야 할 점
+    """
+
+def build_page_analysis_prompt(lecture_text, related_jokbo, subject):
+    """일반 페이지용: 방향성, 쌍둥이문제, 해설 생성"""
+    jokbo_ctx = "\n".join([f"- {r['content']['text'][:300]}" for r in related_jokbo[:3]])
+    
+    return f"""
+    너는 의대 조교다. 현재 강의록 페이지와 연관된 족보(기출)를 분석해라.
+    과목: {subject}
+    
+    [관련 족보/기출 내용]
+    {jokbo_ctx}
+    
+    [현재 강의 내용]
+    {lecture_text[:1500]}
+    
+    다음 3가지 섹션으로 나누어 출력하라. 각 섹션 헤더를 정확히 지킬 것.
+    
+    [SECTION: DIRECTION]
+    이 페이지 공부 방향성을 한 문단으로 요약. (어떤 키워드가 족보에 자주 나오는지 등)
+    
+    [SECTION: TWIN_Q]
+    위 족보 문제와 유사한 '쌍둥이 문제(변형 문제)'를 1개 만들어라. (객관식 또는 단답형)
+    
+    [SECTION: EXPLANATION]
+    위 쌍둥이 문제의 정답과, 왜 그것이 답인지에 대한 족보 기반 해설.
     """
 
 def build_chat_prompt(history: list, context_text: str, related_jokbo: list, question: str):
     jokbo_ctx = "\n".join([f"- {r['content']['text'][:300]}" for r in related_jokbo[:3]])
     return f"""
     당신은 의대 조교입니다. 학생의 질문에 답변해주세요.
-    
-    [현재 보고 있는 강의 내용]
-    {context_text[:1000]}
-    
-    [관련 족보/기출 내용]
-    {jokbo_ctx}
-    
-    [학생 질문]
-    {question}
-    
+    [현재 보고 있는 강의 내용] {context_text[:1000]}
+    [관련 족보/기출 내용] {jokbo_ctx}
+    [학생 질문] {question}
     답변은 친절하고 명확하게, 족보 내용이 있다면 그것을 근거로 설명해주세요.
     """
 
@@ -322,6 +387,7 @@ def build_transcript_prompt(chunks: list[str], related_packs: list[list[dict]], 
     {packed}
     출력: [족보 적중 노트] 형식으로 요약.
     """
+
 def chunk_transcript(text: str, max_chars: int = 900):
     parts = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
     chunks = []
@@ -351,6 +417,25 @@ with st.sidebar:
             st.markdown("**Student Admin**")
             st.caption("본과 2학년")
         if st.button("로그아웃", use_container_width=True): logout()
+
+    # --- NEW: 내 학습 과목 리스트 ---
+    st.markdown("### 📚 내 학습 과목")
+    my_subjects = sorted({x.get("subject", "기타") for x in st.session_state.db})
+    if my_subjects:
+        for s in my_subjects:
+            st.markdown(
+                f"""
+                <div class="sidebar-subject">
+                    <span class="sidebar-icon">📘</span> {s}
+                </div>
+                """, 
+                unsafe_allow_html=True
+            )
+    else:
+        st.caption("아직 등록된 과목이 없습니다.")
+        st.caption("'족보 관리' 탭에서 추가해주세요.")
+    st.divider()
+    # ------------------------------
 
     st.markdown("### ⚙️ 설정")
     with st.container(border=True):
@@ -494,7 +579,7 @@ with tab2:
                 st.rerun()
         with c_header: st.markdown(f"#### 📖 {target_subj} - 실시간 강의 분석")
         
-        # 파일 업로드 영역 (Expander로 숨김 처리)
+        # 파일 업로드 영역
         with st.expander("📂 강의 PDF 파일 업로드 / 변경", expanded=(st.session_state.lecture_doc is None)):
             l_file = st.file_uploader("PDF 파일 선택", type="pdf", key="t2_f", label_visibility="collapsed")
             if l_file:
@@ -503,51 +588,48 @@ with tab2:
                     st.session_state.lecture_filename = l_file.name
                     st.session_state.current_page = 0
                     st.session_state.last_page_sig = None
-                    st.session_state.chat_history = [] # 파일 바뀌면 채팅 초기화
+                    st.session_state.chat_history = [] 
 
         if st.session_state.lecture_doc:
             doc = st.session_state.lecture_doc
             
-            # 메인 레이아웃: 왼쪽(뷰어, 큼) / 오른쪽(AI, 작음)
+            # 메인 레이아웃: 왼쪽(뷰어) / 오른쪽(AI)
             col_view, col_ai = st.columns([1.8, 1.2])
             
             # 1. 왼쪽: PDF 뷰어
             with col_view:
                 with st.container(border=True):
-                    # 네비게이션
                     c1, c2, c3 = st.columns([1, 3, 1])
                     if c1.button("◀ 이전", use_container_width=True):
                         if st.session_state.current_page > 0: 
                             st.session_state.current_page -= 1
-                            st.session_state.chat_history = [] # 페이지 바뀌면 채팅 초기화 (선택사항)
+                            st.session_state.chat_history = [] 
                     c2.markdown(f"<div style='text-align:center; font-weight:bold; padding-top:8px;'>Page {st.session_state.current_page+1} / {len(doc)}</div>", unsafe_allow_html=True)
                     if c3.button("다음 ▶", use_container_width=True):
                         if st.session_state.current_page < len(doc)-1: 
                             st.session_state.current_page += 1
-                            st.session_state.chat_history = [] # 페이지 바뀌면 채팅 초기화
+                            st.session_state.chat_history = [] 
                     
-                    # 이미지 렌더링
                     page = doc.load_page(st.session_state.current_page)
-                    pix = page.get_pixmap(dpi=180) # 해상도 높임
+                    pix = page.get_pixmap(dpi=180) 
                     st.image(Image.frombytes("RGB", [pix.width, pix.height], pix.samples), use_container_width=True)
                     p_text = page.get_text() or ""
 
             # 2. 오른쪽: AI 조교 (분석 & 채팅)
             with col_ai:
                 with st.container(border=True):
-                    st.markdown("##### 🤖 AI 조교")
-                    
                     # 탭 분리: 자동 분석 vs 채팅
-                    ai_tab1, ai_tab2 = st.tabs(["📝 요약 분석", "💬 질의응답"])
+                    ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
                     
-                    # 공통 분석 로직 (페이지 텍스트 기반)
+                    # 공통 분석 로직
                     if not p_text.strip():
                         analysis_ready = False
-                        st.caption("텍스트가 없는 이미지 페이지입니다.")
+                        with ai_tab1: st.caption("텍스트가 없는 이미지 페이지입니다.")
                     else:
                         analysis_ready = True
-                        # Analysis State Check
                         psig = hash(p_text)
+                        
+                        # 페이지 변경 시 AI 분석 트리거
                         if psig != st.session_state.last_page_sig:
                             st.session_state.last_page_sig = psig
                             sub_db = filter_db_by_subject(target_subj, st.session_state.db)
@@ -556,51 +638,95 @@ with tab2:
                         
                         rel = st.session_state.last_related
                     
-                    # --- Tab A: 자동 분석 ---
+                    # --- Tab A: 족보 분석 ---
                     with ai_tab1:
                         if analysis_ready:
-                            if has_jokbo_evidence(rel):
-                                aisig = (psig, target_subj)
+                            # 1. 첫 페이지면 전체 방향성 (Overview)
+                            if st.session_state.current_page == 0:
+                                st.markdown("##### 🏁 전체 강의 학습 전략")
+                                aisig = ("overview", target_subj, psig)
                                 if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
-                                    with st.spinner("족보 매칭 중..."):
-                                        prmt = build_ta_prompt(p_text, rel, target_subj)
+                                    with st.spinner("강의 전체 방향성 분석 중..."):
+                                        prmt = build_overview_prompt(p_text, target_subj)
                                         res, _ = generate_with_fallback(prmt, st.session_state.text_models)
                                         st.session_state.last_ai_text = res
                                         st.session_state.last_ai_sig = aisig
                                 st.markdown(st.session_state.last_ai_text)
+                            
+                            # 2. 일반 페이지 분석
                             else:
-                                st.info("💡 이 페이지와 직접 연관된 족보 내용은 없습니다.")
-                                st.caption("가볍게 훑고 넘어가셔도 좋습니다.")
+                                if has_jokbo_evidence(rel):
+                                    # 섹션 1: 족보 문항 원문 (가장 중요)
+                                    st.markdown("##### 🔥 관련 족보 문항")
+                                    for r in rel[:2]:
+                                        score = r['score']
+                                        src = r['content'].get('source', 'Unknown')
+                                        txt = r['content'].get('text', '')[:200]
+                                        st.markdown(f"""
+                                        <div class="jokbo-item">
+                                            <div class="jokbo-source">출처: {src} (유사도 {score:.2f})</div>
+                                            {txt}...
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                    
+                                    # AI 분석 실행
+                                    aisig = (psig, target_subj)
+                                    if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
+                                        with st.spinner("족보 기반 심층 분석 중..."):
+                                            prmt = build_page_analysis_prompt(p_text, rel, target_subj)
+                                            raw_res, _ = generate_with_fallback(prmt, st.session_state.text_models)
+                                            
+                                            # 결과 파싱 (간단히 섹션별로 나눔)
+                                            parts = raw_res.split("[SECTION:")
+                                            parsed = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
+                                            for p in parts:
+                                                if "DIRECTION]" in p: parsed["DIRECTION"] = p.replace("DIRECTION]", "").strip()
+                                                elif "TWIN_Q]" in p: parsed["TWIN_Q"] = p.replace("TWIN_Q]", "").strip()
+                                                elif "EXPLANATION]" in p: parsed["EXPLANATION"] = p.replace("EXPLANATION]", "").strip()
+                                            
+                                            st.session_state.last_ai_text = parsed
+                                            st.session_state.last_ai_sig = aisig
+                                    
+                                    # 섹션 2: 공부 방향성
+                                    res_dict = st.session_state.last_ai_text
+                                    if isinstance(res_dict, dict):
+                                        st.markdown("##### 🧭 공부 방향성")
+                                        st.info(res_dict.get("DIRECTION", "분석 중..."))
+                                        
+                                        # 섹션 3: 쌍둥이 문제 (확장)
+                                        with st.expander("🧩 쌍둥이 문제 만들기"):
+                                            st.markdown(res_dict.get("TWIN_Q", "생성 중..."))
+                                            
+                                        # 섹션 4: 해설 (확장)
+                                        with st.expander("✅ 해설 및 정답"):
+                                            st.markdown(res_dict.get("EXPLANATION", "생성 중..."))
+                                    else:
+                                        st.write(res_dict) # Fallback if parsing fails
+                                        
+                                else:
+                                    st.info("💡 이 페이지와 직접 연관된 족보 내용은 없습니다.")
+                                    st.caption("가볍게 훑고 넘어가셔도 좋습니다.")
                         else:
                             st.info("분석할 텍스트가 없습니다.")
 
-                    # --- Tab B: 채팅 (질의응답) ---
+                    # --- Tab B: 채팅 ---
                     with ai_tab2:
-                        # 채팅 기록 표시
                         for msg in st.session_state.chat_history:
                             with st.chat_message(msg["role"]):
                                 st.markdown(msg["content"])
                         
-                        # 입력창
                         if prompt := st.chat_input("질문하세요 (예: 이거 시험에 나와?)"):
-                            if not st.session_state.api_key_ok:
-                                st.error("API Key가 필요합니다.")
+                            if not st.session_state.api_key_ok: st.error("API Key 필요")
                             else:
-                                # 사용자 메시지 추가
                                 st.session_state.chat_history.append({"role": "user", "content": prompt})
-                                with st.chat_message("user"):
-                                    st.markdown(prompt)
+                                with st.chat_message("user"): st.markdown(prompt)
                                 
-                                # 답변 생성
                                 with st.chat_message("assistant"):
                                     with st.spinner("생각 중..."):
                                         if analysis_ready:
                                             chat_prmt = build_chat_prompt(st.session_state.chat_history, p_text, rel, prompt)
                                             response_text, _ = generate_with_fallback(chat_prmt, st.session_state.text_models)
-                                        else:
-                                            # 텍스트 없는 페이지인 경우
-                                            response_text = "이 페이지에는 텍스트가 없어 답변하기 어렵습니다."
-                                        
+                                        else: response_text = "이 페이지에는 텍스트가 없어 답변하기 어렵습니다."
                                         st.markdown(response_text)
                                         st.session_state.chat_history.append({"role": "assistant", "content": response_text})
 
