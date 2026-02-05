@@ -129,6 +129,29 @@ st.markdown("""
     div[data-baseweb="toast"] div {
         color: #ffffff !important;
     }
+    
+    /* 11. 제목 버튼 스타일 (Subject Click) */
+    .subject-btn button {
+        text-align: left;
+        font-size: 1.2rem;
+        background: transparent !important;
+        color: #1c1c1e !important;
+        padding: 0;
+    }
+    .subject-btn button:hover {
+        color: #007aff !important;
+        background: transparent !important;
+    }
+    
+    /* 12. 과목 선택 카드 버튼 (Tab 2) */
+    .stButton button {
+        min-height: 80px;
+    }
+    
+    /* 13. 오디오 인풋 스타일 */
+    div[data-testid="stAudioInput"] {
+        margin-bottom: 15px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -166,6 +189,18 @@ if "current_page" not in st.session_state:
 # For Edit Mode in Tab 1
 if "edit_target_subject" not in st.session_state:
     st.session_state.edit_target_subject = None
+
+# For Detail View in Tab 1
+if "subject_detail_view" not in st.session_state:
+    st.session_state.subject_detail_view = None
+
+# For Subject Selection in Tab 2
+if "t2_selected_subject" not in st.session_state:
+    st.session_state.t2_selected_subject = None
+
+# For Audio Analysis
+if "transcribed_text" not in st.session_state:
+    st.session_state.transcribed_text = ""
 
 # caches
 if "last_page_sig" not in st.session_state:
@@ -247,6 +282,15 @@ def get_subject_stats():
         stats[subj]["count"] += 1
     return stats
 
+def get_subject_files(subject):
+    """특정 과목의 파일 목록 조회"""
+    files = {}
+    for item in st.session_state.db:
+        if item.get("subject") == subject:
+            src = item.get("source", "Unknown")
+            files[src] = files.get(src, 0) + 1
+    return files
+
 # AI & PDF Helpers
 def has_jokbo_evidence(related: list[dict]) -> bool:
     return bool(related) and related[0]["score"] >= 0.72
@@ -320,6 +364,24 @@ def generate_with_fallback(prompt: str, model_names: list[str]):
             last_err = e
             continue
     raise Exception(f"AI 응답 실패: {str(last_err)}")
+
+def transcribe_audio_gemini(audio_bytes, api_key):
+    """Gemini 1.5 Flash를 사용하여 오디오 STT 수행"""
+    try:
+        genai.configure(api_key=api_key)
+        # 1.5 Flash supports audio directly via inline data or upload
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        
+        # WAV 헤더 등은 st.audio_input이 처리해서 넘겨줌 (audio_bytes)
+        # Prompt: 받아쓰기 요청
+        response = model.generate_content([
+            "Please transcribe the following audio file into text accurately. Do not add any conversational text, just the transcription.",
+            {"mime_type": "audio/wav", "data": audio_bytes}
+        ])
+        return response.text
+    except Exception as e:
+        st.error(f"음성 인식 실패: {e}")
+        return None
 
 # Prompts
 def build_ta_prompt(lecture_text: str, related: list[dict], subject: str):
@@ -413,221 +475,314 @@ with st.sidebar:
 st.title("Med-Study OS")
 
 # 탭 구성
-tab1, tab2, tab3 = st.tabs(["📂 족보 관리", "📖 강의 분석", "🎙️ 전사 분석"])
+tab1, tab2, tab3 = st.tabs(["📂 족보 관리", "📖 강의 분석", "🎙️ 강의 녹음/분석"])
 
-# --- TAB 1: 족보 관리 (카드 UI + 수정 기능) ---
+# --- TAB 1: 족보 관리 (카드 UI + 수정 기능 + 상세 보기) ---
 with tab1:
-    col_upload, col_list = st.columns([1, 2])
-    
-    # 1-1. 업로드 패널 (왼쪽)
-    with col_upload:
-        with st.container(border=True):
-            st.markdown("#### ➕ 족보 추가")
-            st.caption("PDF 파일을 업로드하여 AI 학습")
+    # 1. 상세 보기 모드인지 체크
+    if st.session_state.subject_detail_view:
+        # 1-A. 상세 보기 화면
+        target_subj = st.session_state.subject_detail_view
+        
+        # 헤더 & 뒤로가기
+        c_back, c_title = st.columns([1, 5])
+        with c_back:
+            if st.button("← 목록", use_container_width=True):
+                st.session_state.subject_detail_view = None
+                st.rerun()
+        with c_title:
+            st.markdown(f"### 📂 {target_subj} - 파일 목록")
             
-            up_subj = st.selectbox("과목", ["해부학", "생리학", "약리학", "직접입력"], key="up_subj")
-            if up_subj == "직접입력":
-                up_subj_custom = st.text_input("과목명 입력", placeholder="예: 병리학")
-                final_subj = up_subj_custom if up_subj_custom else "기타"
-            else:
-                final_subj = up_subj
+        st.divider()
+        
+        # 파일 목록 조회
+        file_map = get_subject_files(target_subj)
+        
+        if not file_map:
+            st.info("이 과목에 등록된 파일이 없습니다.")
+        else:
+            for fname, count in file_map.items():
+                with st.container(border=True):
+                    c_f1, c_f2 = st.columns([4, 1])
+                    with c_f1:
+                        st.markdown(f"**📄 {fname}**")
+                    with c_f2:
+                        st.caption(f"{count} pages")
+                        
+    else:
+        # 1-B. 목록 보기 화면 (기존 UI)
+        col_upload, col_list = st.columns([1, 2])
+        
+        # 1-1. 업로드 패널 (왼쪽)
+        with col_upload:
+            with st.container(border=True):
+                st.markdown("#### ➕ 족보 추가")
+                st.caption("PDF 파일을 업로드하여 AI 학습")
                 
-            files = st.file_uploader("PDF 선택", accept_multiple_files=True, type="pdf", label_visibility="collapsed")
-            max_p = st.number_input("학습 페이지 수 제한", 1, 500, 60)
-            
-            if st.button("학습 시작", type="primary", use_container_width=True):
-                if not st.session_state.api_key_ok:
-                    st.error("API Key 필요")
-                elif not files:
-                    st.warning("파일 필요")
+                up_subj = st.selectbox("과목", ["해부학", "생리학", "약리학", "직접입력"], key="up_subj")
+                if up_subj == "직접입력":
+                    up_subj_custom = st.text_input("과목명 입력", placeholder="예: 병리학")
+                    final_subj = up_subj_custom if up_subj_custom else "기타"
                 else:
-                    prog = st.progress(0)
-                    new_db = []
-                    for i, f in enumerate(files):
-                        pgs = extract_text_from_pdf(f)[:max_p]
-                        for p in pgs:
-                            emb = get_embedding(p["text"])
-                            if emb:
-                                p["embedding"] = emb
-                                p["subject"] = final_subj
-                                new_db.append(p)
-                        prog.progress((i+1)/len(files))
-                    st.session_state.db.extend(new_db)
-                    st.toast("학습 완료!", icon="🎉")
-                    time.sleep(1)
-                    st.rerun()
+                    final_subj = up_subj
+                    
+                files = st.file_uploader("PDF 선택", accept_multiple_files=True, type="pdf", label_visibility="collapsed")
+                
+                # 학습 페이지 제한 제거됨 (전체 학습)
+                
+                if st.button("학습 시작", type="primary", use_container_width=True):
+                    if not st.session_state.api_key_ok:
+                        st.error("API Key 필요")
+                    elif not files:
+                        st.warning("파일 필요")
+                    else:
+                        prog = st.progress(0)
+                        new_db = []
+                        for i, f in enumerate(files):
+                            # extract_text_from_pdf 전체 실행
+                            pgs = extract_text_from_pdf(f)
+                            for p in pgs:
+                                emb = get_embedding(p["text"])
+                                if emb:
+                                    p["embedding"] = emb
+                                    p["subject"] = final_subj
+                                    new_db.append(p)
+                            prog.progress((i+1)/len(files))
+                        st.session_state.db.extend(new_db)
+                        st.toast("학습 완료!", icon="🎉")
+                        time.sleep(1)
+                        st.rerun()
 
-    # 1-2. 과목 카드 리스트 (오른쪽)
-    with col_list:
-        st.markdown("#### 📚 내 학습 데이터")
+        # 1-2. 과목 카드 리스트 (오른쪽)
+        with col_list:
+            st.markdown("#### 📚 내 학습 데이터")
+            stats = get_subject_stats()
+            
+            if not stats:
+                st.info("등록된 족보가 없습니다. 왼쪽에서 추가해주세요.")
+            
+            # Grid Layout for Cards
+            subjects = sorted(stats.keys())
+            
+            # 2열 그리드로 표시
+            for i in range(0, len(subjects), 2):
+                cols = st.columns(2)
+                for j in range(2):
+                    if i + j < len(subjects):
+                        subj_name = subjects[i+j]
+                        subj_data = stats[subj_name]
+                        
+                        with cols[j]:
+                            # 카드 컨테이너
+                            with st.container(border=True):
+                                # 헤더: 과목명 + 수정 버튼
+                                c_head_1, c_head_2 = st.columns([4, 1])
+                                
+                                # 수정 모드인지 확인
+                                is_editing = (st.session_state.edit_target_subject == subj_name)
+                                
+                                with c_head_1:
+                                    if is_editing:
+                                        new_name_input = st.text_input("새 이름", value=subj_name, key=f"edit_in_{subj_name}", label_visibility="collapsed")
+                                    else:
+                                        # 과목명 클릭 시 상세 보기로 이동 (버튼 스타일)
+                                        if st.button(f"### {subj_name}", key=f"btn_view_{subj_name}", help="클릭하여 파일 목록 보기"):
+                                            st.session_state.subject_detail_view = subj_name
+                                            st.rerun()
+                                
+                                with c_head_2:
+                                    if is_editing:
+                                        if st.button("💾", key=f"save_{subj_name}"):
+                                            if new_name_input and new_name_input != subj_name:
+                                                rename_subject(subj_name, new_name_input)
+                                                st.session_state.edit_target_subject = None
+                                                st.toast("수정 완료!")
+                                                st.rerun()
+                                            else:
+                                                st.session_state.edit_target_subject = None
+                                                st.rerun()
+                                    else:
+                                        if st.button("✏️", key=f"edit_btn_{subj_name}"):
+                                            st.session_state.edit_target_subject = subj_name
+                                            st.rerun()
+
+                                if not is_editing:
+                                    st.markdown("---")
+                                    st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
+                                    st.markdown(f"<span class='gray-text'>🕒 최근 업데이트: {subj_data['last_updated']}</span>", unsafe_allow_html=True)
+
+
+# --- TAB 2: 강의 분석 (과목 선택 카드 + 분석 화면) ---
+with tab2:
+    # 1. 과목 선택 안 된 경우: 과목 선택 그리드 표시
+    if st.session_state.t2_selected_subject is None:
+        st.markdown("#### 📖 학습할 과목을 선택하세요")
+        st.caption("등록된 족보 데이터를 기반으로 강의를 분석합니다.")
+        
+        # Get subjects from DB
         stats = get_subject_stats()
-        
-        if not stats:
-            st.info("등록된 족보가 없습니다. 왼쪽에서 추가해주세요.")
-        
-        # Grid Layout for Cards
         subjects = sorted(stats.keys())
         
-        # 2열 그리드로 표시
-        for i in range(0, len(subjects), 2):
-            cols = st.columns(2)
-            for j in range(2):
-                if i + j < len(subjects):
-                    subj_name = subjects[i+j]
-                    subj_data = stats[subj_name]
-                    
-                    with cols[j]:
-                        # 카드 컨테이너
-                        with st.container(border=True):
-                            # 헤더: 과목명 + 수정 버튼
-                            c_head_1, c_head_2 = st.columns([4, 1])
-                            
-                            # 수정 모드인지 확인
-                            is_editing = (st.session_state.edit_target_subject == subj_name)
-                            
-                            with c_head_1:
-                                if is_editing:
-                                    new_name_input = st.text_input("새 이름", value=subj_name, key=f"edit_in_{subj_name}", label_visibility="collapsed")
-                                else:
-                                    st.markdown(f"### {subj_name}")
-                            
-                            with c_head_2:
-                                if is_editing:
-                                    if st.button("💾", key=f"save_{subj_name}"):
-                                        if new_name_input and new_name_input != subj_name:
-                                            rename_subject(subj_name, new_name_input)
-                                            st.session_state.edit_target_subject = None
-                                            st.toast("수정 완료!")
-                                            st.rerun()
-                                        else:
-                                            st.session_state.edit_target_subject = None
-                                            st.rerun()
-                                else:
-                                    if st.button("✏️", key=f"edit_btn_{subj_name}"):
-                                        st.session_state.edit_target_subject = subj_name
-                                        st.rerun()
-
-                            if not is_editing:
-                                st.markdown("---")
-                                st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
-                                st.markdown(f"<span class='gray-text'>🕒 최근 업데이트: {subj_data['last_updated']}</span>", unsafe_allow_html=True)
-
-
-# --- TAB 2: 강의 분석 ---
-with tab2:
-    with st.container(border=True):
-        st.markdown("#### 📖 실시간 강의 분석")
+        if not subjects:
+             st.info("등록된 족보 데이터가 없습니다. '족보 관리' 탭에서 파일을 추가해주세요.")
+        else:
+             # Grid Layout for Subject Selection Cards
+             cols = st.columns(3)
+             for i, subj in enumerate(subjects):
+                 with cols[i % 3]:
+                     # Display as a big button card with stats
+                     btn_label = f"📘 {subj}\n\n📄 {stats[subj]['count']} pages"
+                     if st.button(btn_label, key=f"t2_sel_{subj}", use_container_width=True):
+                         st.session_state.t2_selected_subject = subj
+                         st.rerun()
+    
+    # 2. 과목 선택 된 경우: 분석 화면 표시
+    else:
+        target_subj = st.session_state.t2_selected_subject
         
-        c_tool, c_view = st.columns([1, 2])
-        with c_tool:
-            if not st.session_state.db:
-                st.warning("DB 데이터가 없습니다.")
-            
-            all_subjs = sorted({x.get("subject", "") for x in st.session_state.db})
-            s_pick = st.selectbox("과목 선택", ["전체"] + all_subjs, key="t2_s")
-            l_file = st.file_uploader("강의 PDF", type="pdf", key="t2_f")
-            
-            st.info("PDF를 업로드하면 AI가 족보와 매칭되는 내용을 실시간으로 분석해줍니다.")
-
-        with c_view:
-            if l_file:
-                if st.session_state.lecture_filename != l_file.name:
-                    st.session_state.lecture_doc = fitz.open(stream=l_file.getvalue(), filetype="pdf")
-                    st.session_state.lecture_filename = l_file.name
-                    st.session_state.current_page = 0
-                    st.session_state.last_page_sig = None
-                
-                doc = st.session_state.lecture_doc
-                
-                # 뷰어 컨트롤
-                col_nav, col_dummy = st.columns([2, 1])
-                with col_nav:
-                    c1, c2, c3 = st.columns([1, 2, 1])
-                    if c1.button("◀", use_container_width=True):
-                        if st.session_state.current_page > 0: st.session_state.current_page -= 1
-                    c2.markdown(f"<div style='text-align:center; padding-top:5px;'>Page {st.session_state.current_page+1} / {len(doc)}</div>", unsafe_allow_html=True)
-                    if c3.button("▶", use_container_width=True):
-                        if st.session_state.current_page < len(doc)-1: st.session_state.current_page += 1
-                
-                # PDF & AI Analysis
-                c_pdf, c_ai = st.columns(2)
-                
-                with c_pdf:
-                    page = doc.load_page(st.session_state.current_page)
-                    pix = page.get_pixmap(dpi=150)
-                    st.image(Image.frombytes("RGB", [pix.width, pix.height], pix.samples), use_container_width=True)
-                    p_text = page.get_text() or ""
-                
-                with c_ai:
-                    with st.container(border=True):
-                        st.markdown("**🤖 조교 분석**")
-                        if not p_text.strip():
-                            st.caption("텍스트 없음")
-                        else:
-                            # Analysis Logic
-                            psig = hash(p_text)
-                            if psig != st.session_state.last_page_sig:
-                                st.session_state.last_page_sig = psig
-                                sub_db = filter_db_by_subject(s_pick, st.session_state.db)
-                                st.session_state.last_related = find_relevant_jokbo(p_text, sub_db)
-                                st.session_state.last_ai_sig = None
-                            
-                            rel = st.session_state.last_related
-                            if has_jokbo_evidence(rel):
-                                aisig = (psig, s_pick)
-                                if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
-                                    with st.spinner("분석 중..."):
-                                        prmt = build_ta_prompt(p_text, rel, s_pick)
-                                        res, _ = generate_with_fallback(prmt, st.session_state.text_models)
-                                        st.session_state.last_ai_text = res
-                                        st.session_state.last_ai_sig = aisig
-                                
-                                st.markdown(st.session_state.last_ai_text)
+        # Header with Back Button
+        c_back, c_header = st.columns([1, 5])
+        with c_back:
+            if st.button("← 과목 변경", key="t2_back_btn"):
+                st.session_state.t2_selected_subject = None
+                st.rerun()
+        with c_header:
+            st.markdown(f"#### 📖 {target_subj} - 실시간 강의 분석")
+        
+        with st.container(border=True):
+             c_tool, c_view = st.columns([1, 2])
+             with c_tool:
+                 st.info(f"선택된 과목: **{target_subj}**")
+                 # File uploader
+                 l_file = st.file_uploader("강의 PDF 업로드", type="pdf", key="t2_f")
+                 st.caption("PDF를 업로드하면 AI가 족보와 매칭되는 내용을 실시간으로 분석해줍니다.")
+             
+             with c_view:
+                if l_file:
+                    if st.session_state.lecture_filename != l_file.name:
+                        st.session_state.lecture_doc = fitz.open(stream=l_file.getvalue(), filetype="pdf")
+                        st.session_state.lecture_filename = l_file.name
+                        st.session_state.current_page = 0
+                        st.session_state.last_page_sig = None
+                    
+                    doc = st.session_state.lecture_doc
+                    
+                    # 뷰어 컨트롤
+                    col_nav, col_dummy = st.columns([2, 1])
+                    with col_nav:
+                        c1, c2, c3 = st.columns([1, 2, 1])
+                        if c1.button("◀", use_container_width=True):
+                            if st.session_state.current_page > 0: st.session_state.current_page -= 1
+                        c2.markdown(f"<div style='text-align:center; padding-top:5px;'>Page {st.session_state.current_page+1} / {len(doc)}</div>", unsafe_allow_html=True)
+                        if c3.button("▶", use_container_width=True):
+                            if st.session_state.current_page < len(doc)-1: st.session_state.current_page += 1
+                    
+                    # PDF & AI Analysis
+                    c_pdf, c_ai = st.columns(2)
+                    
+                    with c_pdf:
+                        page = doc.load_page(st.session_state.current_page)
+                        pix = page.get_pixmap(dpi=150)
+                        st.image(Image.frombytes("RGB", [pix.width, pix.height], pix.samples), use_container_width=True)
+                        p_text = page.get_text() or ""
+                    
+                    with c_ai:
+                        with st.container(border=True):
+                            st.markdown("**🤖 조교 분석**")
+                            if not p_text.strip():
+                                st.caption("텍스트 없음")
                             else:
-                                st.info("관련 족보 없음")
-            else:
-                st.markdown(
-                    """
-                    <div style="height: 300px; display: flex; align-items: center; justify-content: center; color: #ccc; border: 2px dashed #eee; border-radius: 12px;">
-                        PDF 파일을 선택하면 여기에 표시됩니다.
-                    </div>
-                    """, unsafe_allow_html=True
-                )
+                                # Analysis Logic
+                                psig = hash(p_text)
+                                if psig != st.session_state.last_page_sig:
+                                    st.session_state.last_page_sig = psig
+                                    sub_db = filter_db_by_subject(target_subj, st.session_state.db)
+                                    st.session_state.last_related = find_relevant_jokbo(p_text, sub_db)
+                                    st.session_state.last_ai_sig = None
+                                
+                                rel = st.session_state.last_related
+                                if has_jokbo_evidence(rel):
+                                    aisig = (psig, target_subj)
+                                    if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
+                                        with st.spinner("분석 중..."):
+                                            prmt = build_ta_prompt(p_text, rel, target_subj)
+                                            res, _ = generate_with_fallback(prmt, st.session_state.text_models)
+                                            st.session_state.last_ai_text = res
+                                            st.session_state.last_ai_sig = aisig
+                                    
+                                    st.markdown(st.session_state.last_ai_text)
+                                else:
+                                    st.info("관련 족보 없음")
+                else:
+                    st.markdown(
+                        """
+                        <div style="height: 300px; display: flex; align-items: center; justify-content: center; color: #ccc; border: 2px dashed #eee; border-radius: 12px;">
+                            PDF 파일을 선택하면 여기에 표시됩니다.
+                        </div>
+                        """, unsafe_allow_html=True
+                    )
 
 
-# --- TAB 3: 전사 분석 ---
+# --- TAB 3: 강의 녹음/분석 ---
 with tab3:
     with st.container(border=True):
-        st.markdown("#### 🎙️ 강의 녹음/전사 분석")
+        st.markdown("#### 🎙️ 강의 녹음/분석")
+        st.caption("강의를 바로 녹음하거나 녹음 파일을 업로드하면, AI가 족보 내용과 매칭하여 요약해줍니다.")
         
         c_in, c_out = st.columns(2)
         
         with c_in:
-            st.caption("텍스트 입력")
             sub_t3 = st.selectbox("과목", ["전체"] + sorted({x.get("subject", "") for x in st.session_state.db}), key="t3_s")
-            f_txt = st.file_uploader("전사 파일(.txt)", type="txt", key="t3_f")
-            area_txt = st.text_area("직접 입력", height=200, placeholder="강의 내용을 입력하세요...")
             
-            if st.button("분석 실행", type="primary", use_container_width=True):
-                target = (f_txt.getvalue().decode() if f_txt else area_txt).strip()
-                if not target:
-                    st.error("내용 필요")
-                elif not st.session_state.api_key_ok:
+            # --- 탭 내부의 탭 (녹음 vs 업로드/텍스트) ---
+            t3_mode = st.radio("입력 방식", ["🎤 직접 녹음", "📂 파일 업로드 / 텍스트"], horizontal=True, label_visibility="collapsed")
+            
+            target_text = ""
+            
+            if t3_mode == "🎤 직접 녹음":
+                audio_value = st.audio_input("녹음 시작 버튼을 누르세요")
+                if audio_value:
+                    st.success("녹음 완료! (분석 준비됨)")
+                    # 여기서 STT 수행
+                    if st.button("🚀 녹음 내용 분석하기", type="primary", use_container_width=True, key="btn_audio_analyze"):
+                        if not st.session_state.api_key_ok:
+                            st.error("API Key 필요")
+                        else:
+                            with st.spinner("음성을 텍스트로 변환 중... (시간이 걸릴 수 있습니다)"):
+                                transcript = transcribe_audio_gemini(audio_value.getvalue(), st.session_state.api_key)
+                                if transcript:
+                                    st.session_state.transcribed_text = transcript
+                                    target_text = transcript
+                                else:
+                                    st.error("변환 실패")
+
+            else:
+                f_txt = st.file_uploader("전사 파일(.txt)", type="txt", key="t3_f")
+                area_txt = st.text_area("직접 입력", height=200, placeholder="강의 내용을 입력하세요...")
+                if st.button("분석 실행", type="primary", use_container_width=True):
+                    target_text = (f_txt.getvalue().decode() if f_txt else area_txt).strip()
+            
+            # 텍스트가 준비되면 분석 실행 (녹음 후 변환된 텍스트 또는 직접 입력 텍스트)
+            if target_text:
+                if not st.session_state.api_key_ok:
                     st.error("API Key 필요")
                 else:
-                    with st.spinner("분석 중..."):
+                    with st.spinner("족보 데이터와 대조하여 분석 중..."):
                         sdb = filter_db_by_subject(sub_t3, st.session_state.db)
-                        chks = chunk_transcript(target)[:10]
+                        chks = chunk_transcript(target_text)[:10]
                         rels = [find_relevant_jokbo(c, sdb, top_k=3) for c in chks]
                         pmt = build_transcript_prompt(chks, rels, sub_t3)
                         res, _ = generate_with_fallback(pmt, st.session_state.text_models)
                         st.session_state.tr_res = res
-                    st.success("완료!")
-        
+                    st.success("분석 완료!")
+
         with c_out:
             st.caption("분석 결과")
             if "tr_res" in st.session_state:
                 st.info(st.session_state.tr_res)
+                if st.session_state.transcribed_text:
+                    with st.expander("📝 변환된 전체 텍스트 보기"):
+                        st.text(st.session_state.transcribed_text)
             else:
                 st.markdown(
                     """
