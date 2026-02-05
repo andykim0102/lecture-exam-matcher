@@ -2,48 +2,12 @@
 import time
 import re
 import random  # For simulating update times
-import base64
-from io import BytesIO
 import numpy as np
 import fitz  # PyMuPDF
 from PIL import Image
 from sklearn.metrics.pairwise import cosine_similarity
 
 import streamlit as st
-
-# ==========================================
-# 🚑 Monkey Patch for streamlit-drawable-canvas (위치 이동됨)
-# Streamlit 1.40+ 호환성 패치를 라이브러리 임포트보다 먼저 실행해야 함
-# ==========================================
-import streamlit.elements.image as st_image
-if not hasattr(st_image, 'image_to_url'):
-    def image_to_url(image, width, clamp, channels, output_format, image_id, allow_emoji=False):
-        """
-        Streamlit 1.40+ 대응 패치.
-        1. 이미 문자열(URL)이면 그대로 반환.
-        2. PIL 이미지면 Base64로 변환하여 반환 (canvas가 처리할 수 있게).
-        """
-        # 문자열인 경우 (이미 URL임)
-        if isinstance(image, str):
-            return image
-        
-        # PIL Image 또는 호환 객체인 경우 -> Base64 변환
-        try:
-            buffered = BytesIO()
-            # 포맷 지정 (기본 PNG)
-            fmt = output_format if output_format else "PNG"
-            if fmt.upper() == 'JPG': fmt = 'JPEG'
-            
-            image.save(buffered, format=fmt)
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            return f"data:image/{fmt.lower()};base64,{img_str}"
-        except Exception:
-            return "" # 변환 실패 시 빈 문자열
-            
-    st_image.image_to_url = image_to_url
-
-# 이제 안전하게 라이브러리 임포트
-from streamlit_drawable_canvas import st_canvas 
 import google.generativeai as genai
 
 
@@ -159,9 +123,6 @@ st.markdown("""
         gap: 8px;
     }
     .sidebar-icon { font-size: 1.1rem; }
-    
-    /* 12. 캔버스 툴바 스타일 */
-    div[data-testid="stExpander"] { background-color: white; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -228,10 +189,6 @@ if "last_ai_text" not in st.session_state:
 
 if "last_related" not in st.session_state:
     st.session_state.last_related = []
-
-# ✏️ [NEW] 필기 데이터 저장용 (페이지별 저장)
-if "drawings" not in st.session_state:
-    st.session_state.drawings = {}
 
 
 # ==========================================
@@ -392,13 +349,6 @@ def transcribe_audio_gemini(audio_bytes, api_key):
     except Exception as e:
         st.error(f"음성 인식 실패: {e}")
         return None
-
-def pil_to_base64(image):
-    """PIL 이미지를 Base64 URL로 변환 (canvas background용)"""
-    buffered = BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
 
 # --- New Prompts for Specialized Analysis ---
 
@@ -703,49 +653,14 @@ with tab2:
                                 st.session_state.current_page += 1
                                 st.session_state.chat_history = [] 
                     
-                    # 캔버스 툴바 (항상 표시)
-                    col_tool1, col_tool2, col_tool3 = st.columns([1, 1, 1])
-                    with col_tool1:
-                        drawing_mode = st.selectbox(
-                            "도구", ("freedraw", "line", "rect", "circle", "transform"),
-                            label_visibility="collapsed",
-                            index=0
-                        )
-                    with col_tool2:
-                        stroke_width = st.slider("굵기", 1, 25, 3, label_visibility="collapsed")
-                    with col_tool3:
-                        stroke_color = st.color_picker("색상", "#FF0000", label_visibility="collapsed")
-                    
                     # 이미지 렌더링
                     page = doc.load_page(st.session_state.current_page)
                     pix = page.get_pixmap(dpi=150) # 화면 표시용 적정 DPI
                     pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     p_text = page.get_text() or ""
                     
-                    # 캔버스 ID 생성 (페이지별 고유)
-                    canvas_key = f"canvas_{st.session_state.lecture_filename}_{st.session_state.current_page}"
-                    initial_drawing = st.session_state.drawings.get(canvas_key)
-                    
-                    # 🖼️ 이미지를 Base64로 변환하여 전달 (Patch 적용됨)
-                    bg_image_url = pil_to_base64(pil_image)
-
-                    # 항상 캔버스 표시
-                    canvas_result = st_canvas(
-                        fill_color="rgba(255, 165, 0, 0.3)",
-                        stroke_width=stroke_width,
-                        stroke_color=stroke_color,
-                        background_image=pil_image,  # 🚑 PIL 이미지 직접 전달
-                        update_streamlit=True,
-                        height=pil_image.height,
-                        width=pil_image.width,
-                        drawing_mode=drawing_mode,
-                        key=canvas_key,
-                        initial_drawing=initial_drawing
-                    )
-                    
-                    # 필기 데이터 저장 (페이지 전환 후에도 유지)
-                    if canvas_result.json_data is not None:
-                        st.session_state.drawings[canvas_key] = canvas_result.json_data
+                    # 기존 st_canvas 제거하고 st.image 사용
+                    st.image(pil_image, use_container_width=True)
 
             # 2. 오른쪽: AI 조교 (분석 & 채팅)
             with col_ai:
