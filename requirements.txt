@@ -1,8 +1,8 @@
-# requirements.txt
-streamlit
+streamlit>=1.40.0
 google-generativeai>=0.7.0
 pymupdf
 scikit-learn
 numpy
 watchdog
 Pillow
+streamlit-drawable-canvas
