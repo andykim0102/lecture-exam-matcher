@@ -14,7 +14,7 @@ from io import BytesIO
 
 # ==========================================
 # 🚑 Monkey Patch for streamlit-drawable-canvas
-# Streamlit 1.40+ 호환성 문제 및 PIL 이미지 처리 해결
+# Streamlit 1.40+ 호환성 문제 해결을 위한 패치
 # ==========================================
 import streamlit.elements.image as st_image
 if not hasattr(st_image, 'image_to_url'):
@@ -29,7 +29,6 @@ if not hasattr(st_image, 'image_to_url'):
             return image
         
         # PIL Image 또는 호환 객체인 경우 -> Base64 변환
-        # (canvas 라이브러리가 내부적으로 리사이징 후 이 함수를 호출함)
         try:
             buffered = BytesIO()
             # 포맷 지정 (기본 PNG)
@@ -65,10 +64,10 @@ st.markdown("""
     div[data-baseweb="input"] { background-color: #ffffff !important; border: 1px solid #d1d1d6 !important; color: #1c1c1e !important; }
     div[data-baseweb="input"] input { color: #1c1c1e !important; }
     
-    /* 3. 레이아웃 조정 (완전 꽉 찬 화면) */
+    /* 3. 레이아웃 조정 (Full Width & No Padding) */
     .block-container { 
-        padding-top: 1rem; 
-        padding-bottom: 2rem; 
+        padding-top: 1rem !important; 
+        padding-bottom: 2rem !important; 
         padding-left: 1rem !important;
         padding-right: 1rem !important;
         max-width: 100% !important;
