@@ -2,19 +2,18 @@
 import time
 import re
 import random  # For simulating update times
-import streamlit as st
-import google.generativeai as genai
-import fitz  # PyMuPDF
-from PIL import Image
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-from streamlit_drawable_canvas import st_canvas  # ✏️ 필기 기능을 위한 라이브러리
 import base64
 from io import BytesIO
+import numpy as np
+import fitz  # PyMuPDF
+from PIL import Image
+from sklearn.metrics.pairwise import cosine_similarity
+
+import streamlit as st
 
 # ==========================================
-# 🚑 Monkey Patch for streamlit-drawable-canvas
-# Streamlit 1.40+ 호환성 문제 해결을 위한 패치
+# 🚑 Monkey Patch for streamlit-drawable-canvas (위치 이동됨)
+# Streamlit 1.40+ 호환성 패치를 라이브러리 임포트보다 먼저 실행해야 함
 # ==========================================
 import streamlit.elements.image as st_image
 if not hasattr(st_image, 'image_to_url'):
@@ -42,6 +41,11 @@ if not hasattr(st_image, 'image_to_url'):
             return "" # 변환 실패 시 빈 문자열
             
     st_image.image_to_url = image_to_url
+
+# 이제 안전하게 라이브러리 임포트
+from streamlit_drawable_canvas import st_canvas 
+import google.generativeai as genai
+
 
 # ==========================================
 # 0. Page config & Custom CSS
@@ -388,6 +392,13 @@ def transcribe_audio_gemini(audio_bytes, api_key):
     except Exception as e:
         st.error(f"음성 인식 실패: {e}")
         return None
+
+def pil_to_base64(image):
+    """PIL 이미지를 Base64 URL로 변환 (canvas background용)"""
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
 
 # --- New Prompts for Specialized Analysis ---
 
