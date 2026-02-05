@@ -12,11 +12,13 @@ from sklearn.metrics.pairwise import cosine_similarity
 # 0. Page config
 # ==========================================
 st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
-st.caption("📌 흐름: (1) 과목별 족보 업로드→DB 구축  (2) 강의본/전사텍스트 → 조교가 '족보 나온 포인트'만 요약")
 
 # ==========================================
-# 1. Session state
+# 1. Session state initialization
 # ==========================================
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
 if "db" not in st.session_state:
     # item: {"subject": str, "page": int, "text": str, "source": str, "embedding": list[float]}
     st.session_state.db = []
@@ -55,19 +57,52 @@ if "last_ai_text" not in st.session_state:
 if "last_related" not in st.session_state:
     st.session_state.last_related = []
 
-# ==========================================
-# 2. Settings
-# ==========================================
-JOKBO_THRESHOLD = 0.72  # 추천 0.70~0.75
 
+# ==========================================
+# 2. Login Logic
+# ==========================================
+def login():
+    st.title("🩺 Med-Study OS Login")
+    
+    with st.form("login_form"):
+        username = st.text_input("아이디", placeholder="admin")
+        password = st.text_input("비밀번호", type="password", placeholder="1234")
+        submit = st.form_submit_button("로그인")
+        
+        if submit:
+            # 데모용 하드코딩된 비밀번호
+            if password == "1234":
+                st.session_state.logged_in = True
+                st.rerun()
+            else:
+                st.error("비밀번호가 틀렸습니다. (데모 비번: 1234)")
+
+def logout():
+    st.session_state.logged_in = False
+    st.rerun()
+
+
+# ==========================================
+# 3. Main App Logic (Existing Code Wrapped)
+# ==========================================
+
+# 로그인 상태가 아니면 로그인 화면 표시 후 중단
+if not st.session_state.logged_in:
+    login()
+    st.stop()  # 로그인 전에는 아래 코드 실행 안 함
+
+# --- 로그인 이후 실행되는 메인 앱 코드 ---
+
+st.caption("📌 흐름: (1) 과목별 족보 업로드→DB 구축  (2) 강의본/전사텍스트 → 조교가 '족보 나온 포인트'만 요약")
+
+# Settings
+JOKBO_THRESHOLD = 0.72  # 추천 0.70~0.75
 
 def has_jokbo_evidence(related: list[dict]) -> bool:
     return bool(related) and related[0]["score"] >= JOKBO_THRESHOLD
 
 
-# ==========================================
-# 3. Utils
-# ==========================================
+# Utils
 def ensure_configured():
     if st.session_state.get("api_key"):
         genai.configure(api_key=st.session_state["api_key"])
@@ -138,9 +173,7 @@ def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
     return [{"score": float(sims[i]), "content": valid_items[i]} for i in top_idxs]
 
 
-# ==========================================
-# 4. AI (조교 설명)
-# ==========================================
+# AI Helpers
 @st.cache_data(show_spinner=False)
 def list_text_models(api_key: str):
     genai.configure(api_key=api_key)
@@ -307,10 +340,14 @@ def chunk_transcript(text: str, max_chars: int = 900):
 
 
 # ==========================================
-# 6. Sidebar
+# 6. Sidebar (로그인 상태일 때만 표시)
 # ==========================================
 with st.sidebar:
     st.title("🩺 Med-Study")
+    if st.button("로그아웃"):
+        logout()
+
+    st.divider()
 
     api_key = st.text_input("Gemini API Key", type="password", key="api_key_input")
     if api_key:
@@ -387,6 +424,31 @@ with tab1:
         accept_multiple_files=True,
         key="jokbo_pdf_uploader",
     )
+
+    if files:
+        with st.expander("📄 업로드된 파일 미리보기 (첫 페이지만)", expanded=True):
+            selected_file = files[0]
+            if len(files) > 1:
+                file_map = {f.name: f for f in files}
+                sel_name = st.selectbox("확인할 파일 선택", list(file_map.keys()))
+                selected_file = file_map[sel_name]
+            
+            try:
+                # 미리보기용 로드 (메모리 내 바이트 사용)
+                pv_data = selected_file.getvalue()
+                pv_doc = fitz.open(stream=pv_data, filetype="pdf")
+                if len(pv_doc) > 0:
+                    pv_page = pv_doc[0]
+                    pv_pix = pv_page.get_pixmap(dpi=120)
+                    st.image(
+                        Image.frombytes("RGB", [pv_pix.width, pv_pix.height], pv_pix.samples),
+                        caption=f"📄 {selected_file.name} (1페이지)",
+                        width=350
+                    )
+                else:
+                    st.warning("⚠️ 페이지가 없는 PDF입니다.")
+            except Exception as e:
+                st.error(f"❌ 미리보기 로드 실패: {e}")
 
     col_a, col_b = st.columns([1, 2])
     with col_a:
