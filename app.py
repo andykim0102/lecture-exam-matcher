@@ -14,18 +14,34 @@ from io import BytesIO
 
 # ==========================================
 # 🚑 Monkey Patch for streamlit-drawable-canvas
-# Streamlit 1.40+ 호환성 문제 해결을 위한 패치
+# Streamlit 1.40+ 호환성 문제 및 PIL 이미지 처리 해결
 # ==========================================
 import streamlit.elements.image as st_image
 if not hasattr(st_image, 'image_to_url'):
     def image_to_url(image, width, clamp, channels, output_format, image_id, allow_emoji=False):
         """
-        Streamlit 1.40+에서 사라진 image_to_url을 대체하는 더미 함수.
-        이미지가 이미 URL(문자열) 형태인 경우 그대로 반환하여 canvas가 처리하게 함.
+        Streamlit 1.40+ 대응 패치.
+        1. 이미 문자열(URL)이면 그대로 반환.
+        2. PIL 이미지면 Base64로 변환하여 반환 (canvas가 처리할 수 있게).
         """
+        # 문자열인 경우 (이미 URL임)
         if isinstance(image, str):
             return image
-        return "" # Fallback
+        
+        # PIL Image 또는 호환 객체인 경우 -> Base64 변환
+        # (canvas 라이브러리가 내부적으로 리사이징 후 이 함수를 호출함)
+        try:
+            buffered = BytesIO()
+            # 포맷 지정 (기본 PNG)
+            fmt = output_format if output_format else "PNG"
+            if fmt.upper() == 'JPG': fmt = 'JPEG'
+            
+            image.save(buffered, format=fmt)
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            return f"data:image/{fmt.lower()};base64,{img_str}"
+        except Exception:
+            return "" # 변환 실패 시 빈 문자열
+            
     st_image.image_to_url = image_to_url
 
 # ==========================================
@@ -49,17 +65,19 @@ st.markdown("""
     div[data-baseweb="input"] { background-color: #ffffff !important; border: 1px solid #d1d1d6 !important; color: #1c1c1e !important; }
     div[data-baseweb="input"] input { color: #1c1c1e !important; }
     
-    /* 3. 레이아웃 조정 (Full Width) */
+    /* 3. 레이아웃 조정 (완전 꽉 찬 화면) */
     .block-container { 
-        padding-top: 1.5rem; 
+        padding-top: 1rem; 
         padding-bottom: 2rem; 
-        padding-left: 2rem !important;
-        padding-right: 2rem !important;
-        max-width: 100% !important; /* 꽉 차게 설정 */
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        max-width: 100% !important;
     }
+    /* 상단 헤더 여백 최소화 */
+    header[data-testid="stHeader"] { display: none; }
 
     /* 4. 탭 스타일링 */
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; padding: 4px; border-radius: 10px; margin-bottom: 25px; }
+    .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; padding: 4px; border-radius: 10px; margin-bottom: 15px; }
     .stTabs [data-baseweb="tab"] { height: 40px; border-radius: 20px; padding: 0 20px; background-color: #ffffff; border: 1px solid #e0e0e0; font-weight: 600; color: #8e8e93 !important; flex-grow: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
     .stTabs [aria-selected="true"] { background-color: #007aff !important; color: #ffffff !important; box-shadow: 0 4px 8px rgba(0,122,255,0.2); border: none; }
 
@@ -86,10 +104,10 @@ st.markdown("""
 
     /* 7. 과목 카드 제목 버튼 스타일 */
     div.stButton > button h2 {
-        font-size: 2rem !important;
+        font-size: 1.8rem !important;
         font-weight: 800 !important;
         margin: 0 !important;
-        padding: 10px 0 !important;
+        padding: 5px 0 !important;
         color: #1c1c1e !important;
         line-height: 1.2 !important;
     }
@@ -140,7 +158,7 @@ st.markdown("""
     .sidebar-icon { font-size: 1.1rem; }
     
     /* 12. 캔버스 툴바 스타일 */
-    div[data-testid="stExpander"] { background-color: white; border-radius: 12px; border: 1px solid #eee; }
+    div[data-testid="stExpander"] { background-color: white; border-radius: 12px; border: 1px solid #eee; margin-bottom: 10px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -256,8 +274,6 @@ def format_jokbo_text(text):
     족보 텍스트에서 문항 번호(예: 31., 32.)를 찾아 줄바꿈과 볼드체로 가독성을 높임.
     """
     if not text: return ""
-    # 숫자. 패턴 뒤에 공백이 오는 경우를 찾아서 앞뒤로 줄바꿈 추가 및 볼드 처리
-    # 예: "31. " -> "\n\n**31.** "
     formatted = re.sub(r'(?<!\d)(\d+\.)\s+', r'\n\n**\1** ', text)
     return formatted.strip()
 
@@ -373,13 +389,6 @@ def transcribe_audio_gemini(audio_bytes, api_key):
     except Exception as e:
         st.error(f"음성 인식 실패: {e}")
         return None
-
-def pil_to_base64(image):
-    """PIL 이미지를 Base64 URL로 변환 (canvas background용)"""
-    buffered = BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
 
 # --- New Prompts for Specialized Analysis ---
 
@@ -707,15 +716,12 @@ with tab2:
                     canvas_key = f"canvas_{st.session_state.lecture_filename}_{st.session_state.current_page}"
                     initial_drawing = st.session_state.drawings.get(canvas_key)
                     
-                    # 🖼️ 이미지를 Base64로 변환하여 전달 (Patch 적용됨)
-                    bg_image_url = pil_to_base64(pil_image)
-
-                    # 항상 캔버스 표시
+                    # 항상 캔버스 표시 (이미지 객체 전달)
                     canvas_result = st_canvas(
                         fill_color="rgba(255, 165, 0, 0.3)",
                         stroke_width=stroke_width,
                         stroke_color=stroke_color,
-                        background_image=bg_image_url,
+                        background_image=pil_image,  # 🚑 PIL 이미지 직접 전달
                         update_streamlit=True,
                         height=pil_image.height,
                         width=pil_image.width,
