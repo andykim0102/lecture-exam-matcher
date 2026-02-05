@@ -1,38 +1,37 @@
-# app.py
+# app.py (Optimized)
 import time
 import re
-import random  # For simulating update times
+import random
 import numpy as np
 import fitz  # PyMuPDF
 from PIL import Image
 from sklearn.metrics.pairwise import cosine_similarity
-
 import streamlit as st
 import google.generativeai as genai
-
+from google.api_core import retry  # For robust API calls
 
 # ==========================================
 # 0. Page config & Custom CSS
 # ==========================================
 st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
 
-# 실제 앱 느낌을 위한 커스텀 CSS 주입
+# Custom CSS for UI Enhancement
 st.markdown("""
 <style>
-    /* 1. 강제 라이트 모드 적용 */
+    /* 1. Force Light Mode & Colors */
     .stApp { background-color: #f8f9fa; } 
     h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown { color: #1c1c1e !important; }
     .gray-text, .text-sm, .login-desc, small { color: #8e8e93 !important; }
     
-    /* 버튼 텍스트 색상 복구 */
+    /* Button Text Colors */
     div.stButton > button p { color: #007aff !important; }
     div.stButton > button[kind="primary"] p { color: #ffffff !important; }
 
-    /* 2. 입력창 스타일 */
+    /* 2. Input Styles */
     div[data-baseweb="input"] { background-color: #ffffff !important; border: 1px solid #d1d1d6 !important; color: #1c1c1e !important; }
     div[data-baseweb="input"] input { color: #1c1c1e !important; }
     
-    /* 3. 레이아웃 조정 (Full Width & No Padding) */
+    /* 3. Layout Adjustments */
     .block-container { 
         padding-top: 1rem !important; 
         padding-bottom: 2rem !important; 
@@ -40,15 +39,14 @@ st.markdown("""
         padding-right: 1rem !important;
         max-width: 100% !important;
     }
-    /* 상단 헤더 여백 최소화 */
     header[data-testid="stHeader"] { display: none; }
 
-    /* 4. 탭 스타일링 */
+    /* 4. Tab Styles */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; padding: 4px; border-radius: 10px; margin-bottom: 15px; }
     .stTabs [data-baseweb="tab"] { height: 40px; border-radius: 20px; padding: 0 20px; background-color: #ffffff; border: 1px solid #e0e0e0; font-weight: 600; color: #8e8e93 !important; flex-grow: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
     .stTabs [aria-selected="true"] { background-color: #007aff !important; color: #ffffff !important; box-shadow: 0 4px 8px rgba(0,122,255,0.2); border: none; }
 
-    /* 5. 카드 컨테이너 */
+    /* 5. Card Containers */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         border-radius: 20px; 
         border: 1px solid #edf2f7; 
@@ -63,13 +61,13 @@ st.markdown("""
         border-color: #007aff;
     }
 
-    /* 6. 버튼 스타일 */
+    /* 6. Buttons */
     div.stButton > button { border-radius: 12px; font-weight: 600; border: none; box-shadow: none; background-color: #f2f2f7; transition: all 0.2s; height: 3rem; }
     div.stButton > button:hover { background-color: #e5e5ea; transform: scale(0.98); }
     div.stButton > button[kind="primary"] { background-color: #007aff; box-shadow: 0 4px 10px rgba(0,122,255,0.2); }
     div.stButton > button[kind="primary"]:hover { background-color: #0062cc; box-shadow: 0 6px 14px rgba(0,122,255,0.3); }
 
-    /* 7. 과목 카드 제목 버튼 스타일 */
+    /* 7. Subject Title Button */
     div.stButton > button h2 {
         font-size: 1.8rem !important;
         font-weight: 800 !important;
@@ -79,18 +77,17 @@ st.markdown("""
         line-height: 1.2 !important;
     }
 
-    /* 8. 로그인 & 기타 */
+    /* 8. Login & Misc */
     .login-logo { font-size: 5rem; margin-bottom: 10px; animation: bounce 2s infinite; }
     @keyframes bounce { 0%, 20%, 50%, 80%, 100% {transform: translateY(0);} 40% {transform: translateY(-20px);} 60% {transform: translateY(-10px);} }
     .text-bold { font-weight: 700; color: #1c1c1e !important; }
     div[data-testid="stFileUploader"] { padding: 20px; border: 2px dashed #d1d1d6; border-radius: 16px; background-color: #fafafa; }
-    div[data-baseweb="toast"] div { color: #ffffff !important; }
     
-    /* 9. 채팅 메시지 스타일 */
+    /* 9. Chat Messages */
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 10. 족보 아이템 스타일 */
+    /* 10. Jokbo Items */
     .jokbo-item {
         background-color: #fffde7;
         border: 1px solid #fff59d;
@@ -108,7 +105,7 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
     
-    /* 11. 사이드바 과목 리스트 스타일 */
+    /* 11. Sidebar Items */
     .sidebar-subject {
         padding: 10px 15px;
         background-color: white;
@@ -157,27 +154,22 @@ if "lecture_filename" not in st.session_state:
 if "current_page" not in st.session_state:
     st.session_state.current_page = 0
 
-# For Edit Mode in Tab 1
 if "edit_target_subject" not in st.session_state:
     st.session_state.edit_target_subject = None
 
-# For Detail View in Tab 1
 if "subject_detail_view" not in st.session_state:
     st.session_state.subject_detail_view = None
 
-# For Subject Selection in Tab 2
 if "t2_selected_subject" not in st.session_state:
     st.session_state.t2_selected_subject = None
 
-# For Audio Analysis
 if "transcribed_text" not in st.session_state:
     st.session_state.transcribed_text = ""
 
-# For Chat History in Tab 2
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# caches
+# Caches
 if "last_page_sig" not in st.session_state:
     st.session_state.last_page_sig = None
 
@@ -230,9 +222,6 @@ def logout():
 # 3. Helpers & Data Logic
 # ==========================================
 def format_jokbo_text(text):
-    """
-    족보 텍스트에서 문항 번호(예: 31., 32.)를 찾아 줄바꿈과 볼드체로 가독성을 높임.
-    """
     if not text: return ""
     formatted = re.sub(r'(?<!\d)(\d+\.)\s+', r'\n\n**\1** ', text)
     return formatted.strip()
@@ -250,8 +239,8 @@ def get_subject_stats():
     for item in st.session_state.db:
         subj = item.get("subject", "기타")
         if subj not in stats:
-            rand_min = random.randint(1, 59)
-            stats[subj] = {"count": 0, "last_updated": f"{rand_min}분 전"}
+            # 실시간 업데이트 시뮬레이션 제거 (or keep random for demo feel)
+            stats[subj] = {"count": 0, "last_updated": "방금 전"}
         stats[subj]["count"] += 1
     return stats
 
@@ -263,15 +252,17 @@ def get_subject_files(subject):
             files[src] = files.get(src, 0) + 1
     return files
 
-# AI & PDF Helpers
 def has_jokbo_evidence(related: list[dict]) -> bool:
-    return bool(related) and related[0]["score"] >= 0.72
+    # 유사도 임계값 조정 (0.72는 다소 높을 수 있으므로 상황에 맞게 조정)
+    return bool(related) and related[0]["score"] >= 0.70
 
 def ensure_configured():
     if st.session_state.get("api_key"):
         genai.configure(api_key=st.session_state["api_key"])
 
+@st.cache_data(show_spinner=False)
 def list_text_models(api_key: str):
+    """모델 목록 가져오기 (캐싱 적용)"""
     try:
         genai.configure(api_key=api_key)
         models = genai.list_models()
@@ -294,17 +285,23 @@ def extract_text_from_pdf(uploaded_file):
             pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
     return pages
 
+# Retry decorator for API calls
+@retry.Retry(predicate=retry.if_exception_type(Exception)) 
+def get_embedding_with_retry(text, model="models/text-embedding-004"):
+    return genai.embed_content(model=model, content=text, task_type="retrieval_document")["embedding"]
+
 def get_embedding(text: str):
     text = (text or "").strip()
     if not text: return []
-    text = text[:12000]
+    text = text[:9000] # Safe limit for embedding models
     ensure_configured()
     try:
-        return genai.embed_content(model="models/text-embedding-004", content=text, task_type="retrieval_document")["embedding"]
+        return get_embedding_with_retry(text, "models/text-embedding-004")
     except:
         try:
-            return genai.embed_content(model="models/embedding-001", content=text, task_type="retrieval_document")["embedding"]
-        except:
+            return get_embedding_with_retry(text, "models/embedding-001")
+        except Exception as e:
+            # st.error(f"Embedding failed: {e}") # Debug only
             return []
 
 def filter_db_by_subject(subject: str, db: list[dict]):
@@ -314,11 +311,15 @@ def filter_db_by_subject(subject: str, db: list[dict]):
 
 def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
     if not db: return []
+    # Query embedding should ideally be cached if query is repeated, but text changes often here.
     query_emb = get_embedding(query_text)
     if not query_emb: return []
     valid_items = [item for item in db if item.get("embedding")]
     if not valid_items: return []
     db_embs = [item["embedding"] for item in valid_items]
+    
+    if len(db_embs) == 0: return []
+    
     sims = cosine_similarity([query_emb], db_embs)[0]
     top_idxs = np.argsort(sims)[::-1][:top_k]
     return [{"score": float(sims[i]), "content": valid_items[i]} for i in top_idxs]
@@ -327,9 +328,13 @@ def generate_with_fallback(prompt: str, model_names: list[str]):
     ensure_configured()
     candidates = model_names if model_names else ["gemini-1.5-flash", "gemini-pro"]
     last_err = None
+    
+    # Generation config to reduce randomness for factual tasks
+    config = genai.GenerationConfig(temperature=0.3)
+    
     for name in candidates:
         try:
-            model = genai.GenerativeModel(name)
+            model = genai.GenerativeModel(name, generation_config=config)
             res = model.generate_content(prompt)
             if res.text: return res.text, name
         except Exception as e: 
@@ -350,10 +355,9 @@ def transcribe_audio_gemini(audio_bytes, api_key):
         st.error(f"음성 인식 실패: {e}")
         return None
 
-# --- New Prompts for Specialized Analysis ---
+# --- Prompt Builders (Kept mostly same, added safety) ---
 
 def build_overview_prompt(first_page_text, subject):
-    """강의록 첫 페이지용: 전체 공부 방향성 제시"""
     return f"""
     너는 의대 수석 조교다. 지금 학생이 '{subject}' 강의록의 첫 페이지(표지/목차)를 보고 있다.
     이 강의록 전체를 공부할 때 어떤 마음가짐과 전략을 가져야 하는지, 족보(기출) 패턴을 고려하여 조언해라.
@@ -368,9 +372,7 @@ def build_overview_prompt(first_page_text, subject):
     """
 
 def build_page_analysis_prompt(lecture_text, related_jokbo, subject):
-    """일반 페이지용: 방향성, 쌍둥이문제, 해설 생성"""
     jokbo_ctx = "\n".join([f"- {r['content']['text'][:300]}" for r in related_jokbo[:3]])
-    
     return f"""
     너는 의대 조교다. 현재 강의록 페이지와 연관된 족보(기출)를 분석해라.
     과목: {subject}
@@ -455,7 +457,7 @@ with st.sidebar:
             st.caption("본과 2학년")
         if st.button("로그아웃", use_container_width=True): logout()
 
-    # --- NEW: 내 학습 과목 리스트 ---
+    # --- 내 학습 과목 리스트 ---
     st.markdown("### 📚 내 학습 과목")
     my_subjects = sorted({x.get("subject", "기타") for x in st.session_state.db})
     if my_subjects:
@@ -470,27 +472,27 @@ with st.sidebar:
             )
     else:
         st.caption("아직 등록된 과목이 없습니다.")
-        st.caption("'족보 관리' 탭에서 추가해주세요.")
     st.divider()
-    # ------------------------------
 
     st.markdown("### ⚙️ 설정")
     with st.container(border=True):
         api_key_input = st.text_input("Gemini API Key", type="password", key="api_key_input")
         if api_key_input:
             api_key = api_key_input.strip()
-            try:
+            # 간단한 유효성 검사
+            if len(api_key) > 10:
                 st.session_state.api_key = api_key
-                genai.configure(api_key=api_key)
+                # 모델 리스트 로딩 (캐시됨)
                 models = list_text_models(api_key)
                 if models:
                     st.session_state.api_key_ok = True
                     st.session_state.text_models = models
                     st.session_state.best_text_model = pick_best_text_model(models)
                     st.success(f"연결됨: {st.session_state.best_text_model}")
-                else: st.error("모델 권한 없음")
-            except Exception as e: st.error(f"키 오류: {e}")
-        else: st.warning("API Key 입력 필요")
+                else: 
+                    st.error("API 키가 유효하지 않거나 모델 권한이 없습니다.")
+            else:
+                st.warning("유효한 API 키를 입력하세요.")
             
     st.markdown("### 📊 DB 현황")
     with st.container(border=True):
@@ -502,7 +504,6 @@ with st.sidebar:
 # --- 메인 콘텐츠 ---
 st.title("Med-Study OS")
 
-# 탭 구성
 tab1, tab2, tab3 = st.tabs(["📂 족보 관리", "📖 강의 분석", "🎙️ 강의 녹음/분석"])
 
 # --- TAB 1: 족보 관리 ---
@@ -535,31 +536,46 @@ with tab1:
                     up_subj_custom = st.text_input("과목명 입력", placeholder="예: 병리학")
                     final_subj = up_subj_custom if up_subj_custom else "기타"
                 else: final_subj = up_subj
+                
                 files = st.file_uploader("PDF 선택", accept_multiple_files=True, type="pdf", label_visibility="collapsed")
+                
                 if st.button("학습 시작", type="primary", use_container_width=True):
-                    if not st.session_state.api_key_ok: st.error("API Key 필요")
-                    elif not files: st.warning("파일 필요")
+                    if not st.session_state.api_key_ok: st.error("API Key 설정이 필요합니다.")
+                    elif not files: st.warning("파일을 선택해주세요.")
                     else:
-                        prog = st.progress(0)
+                        prog_bar = st.progress(0)
+                        status_text = st.empty()
                         new_db = []
+                        total_files = len(files)
+                        
                         for i, f in enumerate(files):
+                            status_text.text(f"처리 중: {f.name}...")
                             pgs = extract_text_from_pdf(f)
-                            for p in pgs:
+                            
+                            # 페이지별 임베딩 처리
+                            for p_idx, p in enumerate(pgs):
                                 emb = get_embedding(p["text"])
                                 if emb:
                                     p["embedding"] = emb
                                     p["subject"] = final_subj
                                     new_db.append(p)
-                            prog.progress((i+1)/len(files))
+                                # 진행률 미세 업데이트 (선택 사항)
+                                
+                            prog_bar.progress((i + 1) / total_files)
+                            
                         st.session_state.db.extend(new_db)
-                        st.toast("학습 완료!", icon="🎉")
+                        status_text.text("학습 완료!")
+                        st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
                         time.sleep(1)
                         st.rerun()
+                        
         with col_list:
             st.markdown("#### 📚 내 학습 데이터")
             stats = get_subject_stats()
             if not stats: st.info("등록된 족보가 없습니다. 왼쪽에서 추가해주세요.")
             subjects = sorted(stats.keys())
+            
+            # Grid Layout for Subjects
             for i in range(0, len(subjects), 2):
                 cols = st.columns(2)
                 for j in range(2):
@@ -573,7 +589,6 @@ with tab1:
                                 with c_head_1:
                                     if is_editing: new_name_input = st.text_input("새 이름", value=subj_name, key=f"edit_in_{subj_name}", label_visibility="collapsed")
                                     else:
-                                        # 과목명 클릭 시 상세 보기로 이동 (버튼 스타일) - h2 태그로 꽉 차게
                                         if st.button(f"## {subj_name}", key=f"btn_view_{subj_name}", help="클릭하여 파일 목록 보기"):
                                             st.session_state.subject_detail_view = subj_name
                                             st.rerun()
@@ -591,9 +606,9 @@ with tab1:
                                 if not is_editing:
                                     st.markdown("---")
                                     st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
-                                    st.markdown(f"<span class='gray-text'>🕒 최근 업데이트: {subj_data['last_updated']}</span>", unsafe_allow_html=True)
+                                    st.markdown(f"<span class='gray-text'>🕒 {subj_data['last_updated']}</span>", unsafe_allow_html=True)
 
-# --- TAB 2: 강의 분석 (UI 개선 & Chat & Canvas) ---
+# --- TAB 2: 강의 분석 ---
 with tab2:
     if st.session_state.t2_selected_subject is None:
         st.markdown("#### 📖 학습할 과목을 선택하세요")
@@ -604,7 +619,6 @@ with tab2:
              cols = st.columns(3)
              for i, subj in enumerate(subjects):
                  with cols[i % 3]:
-                     # 과목 선택 카드도 크게
                      btn_label = f"## {subj}\n\n📄 {stats[subj]['count']} pages"
                      if st.button(btn_label, key=f"t2_sel_{subj}", use_container_width=True):
                          st.session_state.t2_selected_subject = subj
@@ -618,7 +632,6 @@ with tab2:
                 st.rerun()
         with c_header: st.markdown(f"#### 📖 {target_subj} - 실시간 강의 분석")
         
-        # 파일 업로드 영역
         with st.expander("📂 강의 PDF 파일 업로드 / 변경", expanded=(st.session_state.lecture_doc is None)):
             l_file = st.file_uploader("PDF 파일 선택", type="pdf", key="t2_f", label_visibility="collapsed")
             if l_file:
@@ -631,14 +644,11 @@ with tab2:
 
         if st.session_state.lecture_doc:
             doc = st.session_state.lecture_doc
-            
-            # 메인 레이아웃: 왼쪽(뷰어) / 오른쪽(AI)
             col_view, col_ai = st.columns([1.8, 1.2])
             
-            # 1. 왼쪽: PDF 뷰어 (with 필기 모드)
+            # Left: Viewer
             with col_view:
                 with st.container(border=True):
-                    # 네비게이션 & 툴바
                     c1, c2, c3 = st.columns([1, 2, 1])
                     with c1:
                         if st.button("◀", use_container_width=True):
@@ -653,22 +663,18 @@ with tab2:
                                 st.session_state.current_page += 1
                                 st.session_state.chat_history = [] 
                     
-                    # 이미지 렌더링
+                    # Render Image
                     page = doc.load_page(st.session_state.current_page)
-                    pix = page.get_pixmap(dpi=150) # 화면 표시용 적정 DPI
+                    pix = page.get_pixmap(dpi=150)
                     pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     p_text = page.get_text() or ""
-                    
-                    # 기존 st_canvas 제거하고 st.image 사용
                     st.image(pil_image, use_container_width=True)
 
-            # 2. 오른쪽: AI 조교 (분석 & 채팅)
+            # Right: AI Assistant
             with col_ai:
                 with st.container(border=True):
-                    # 탭 분리: 자동 분석 vs 채팅
                     ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
                     
-                    # 공통 분석 로직
                     if not p_text.strip():
                         analysis_ready = False
                         with ai_tab1: st.caption("텍스트가 없는 이미지 페이지입니다.")
@@ -676,7 +682,6 @@ with tab2:
                         analysis_ready = True
                         psig = hash(p_text)
                         
-                        # 페이지 변경 시 AI 분석 트리거
                         if psig != st.session_state.last_page_sig:
                             st.session_state.last_page_sig = psig
                             sub_db = filter_db_by_subject(target_subj, st.session_state.db)
@@ -685,10 +690,8 @@ with tab2:
                         
                         rel = st.session_state.last_related
                     
-                    # --- Tab A: 족보 분석 ---
                     with ai_tab1:
                         if analysis_ready:
-                            # 1. 첫 페이지면 전체 방향성 (Overview)
                             if st.session_state.current_page == 0:
                                 st.markdown("##### 🏁 전체 강의 학습 전략")
                                 aisig = ("overview", target_subj, psig)
@@ -699,17 +702,13 @@ with tab2:
                                         st.session_state.last_ai_text = res
                                         st.session_state.last_ai_sig = aisig
                                 st.markdown(st.session_state.last_ai_text)
-                            
-                            # 2. 일반 페이지 분석
                             else:
                                 if has_jokbo_evidence(rel):
-                                    # 섹션 1: 족보 문항 원문 (가장 중요) - 항상 표시
                                     st.markdown("##### 🔥 관련 족보 문항")
                                     for r in rel[:2]:
                                         score = r['score']
                                         src = r['content'].get('source', 'Unknown')
                                         txt = r['content'].get('text', '')[:300]
-                                        # 포맷팅 적용
                                         formatted_txt = format_jokbo_text(txt)
                                         st.markdown(f"""
                                         <div class="jokbo-item">
@@ -718,14 +717,12 @@ with tab2:
                                         </div>
                                         """, unsafe_allow_html=True)
                                     
-                                    # AI 분석 실행
                                     aisig = (psig, target_subj)
                                     if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
                                         with st.spinner("족보 기반 심층 분석 중..."):
                                             prmt = build_page_analysis_prompt(p_text, rel, target_subj)
                                             raw_res, _ = generate_with_fallback(prmt, st.session_state.text_models)
                                             
-                                            # 결과 파싱 (간단히 섹션별로 나눔)
                                             parts = raw_res.split("[SECTION:")
                                             parsed = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
                                             for p in parts:
@@ -736,30 +733,22 @@ with tab2:
                                             st.session_state.last_ai_text = parsed
                                             st.session_state.last_ai_sig = aisig
                                     
-                                    # 섹션 2, 3, 4: 심화 분석 (접기/펼치기)
                                     res_dict = st.session_state.last_ai_text
                                     if isinstance(res_dict, dict):
-                                        # 공부 방향성 (Expander)
-                                        with st.expander("🧭 공부 방향성 보기"):
+                                        with st.expander("🧭 공부 방향성 보기", expanded=True):
                                             st.markdown(res_dict.get("DIRECTION", "분석 중..."))
-                                        
-                                        # 쌍둥이 문제 (Expander)
                                         with st.expander("🧩 쌍둥이 문제 만들기"):
                                             st.markdown(res_dict.get("TWIN_Q", "생성 중..."))
-                                            
-                                        # 해설 (Expander)
                                         with st.expander("✅ 해설 및 정답"):
                                             st.markdown(res_dict.get("EXPLANATION", "생성 중..."))
                                     else:
-                                        st.write(res_dict) # Fallback if parsing fails
-                                        
+                                        st.write(res_dict)
                                 else:
                                     st.info("💡 이 페이지와 직접 연관된 족보 내용은 없습니다.")
                                     st.caption("가볍게 훑고 넘어가셔도 좋습니다.")
                         else:
                             st.info("분석할 텍스트가 없습니다.")
 
-                    # --- Tab B: 채팅 ---
                     with ai_tab2:
                         for msg in st.session_state.chat_history:
                             with st.chat_message(msg["role"]):
@@ -792,7 +781,6 @@ with tab2:
 with tab3:
     with st.container(border=True):
         st.markdown("#### 🎙️ 강의 녹음/분석")
-        st.caption("강의를 바로 녹음하거나 녹음 파일을 업로드하면, AI가 족보 내용과 매칭하여 요약해줍니다.")
         
         c_in, c_out = st.columns(2)
         with c_in:
@@ -801,9 +789,9 @@ with tab3:
             target_text = ""
             
             if t3_mode == "🎤 직접 녹음":
-                audio_value = st.audio_input("녹음 시작 버튼을 누르세요")
+                # Updated for newer streamlit versions if supported
+                audio_value = st.audio_input("녹음 시작")
                 if audio_value:
-                    st.success("녹음 완료! (분석 준비됨)")
                     if st.button("🚀 녹음 내용 분석하기", type="primary", use_container_width=True, key="btn_audio_analyze"):
                         if not st.session_state.api_key_ok: st.error("API Key 필요")
                         else:
