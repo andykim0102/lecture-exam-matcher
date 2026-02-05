@@ -1,4 +1,4 @@
-# app.py (Optimized)
+# app.py (Optimized + Handwriting)
 import time
 import re
 import random
@@ -9,6 +9,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 import streamlit as st
 import google.generativeai as genai
 from google.api_core import retry  # For robust API calls
+
+# Try importing st_canvas, handle if missing
+try:
+    from streamlit_drawable_canvas import st_canvas
+except ImportError:
+    st_canvas = None
 
 # ==========================================
 # 0. Page config & Custom CSS
@@ -120,6 +126,17 @@ st.markdown("""
         gap: 8px;
     }
     .sidebar-icon { font-size: 1.1rem; }
+    
+    /* 12. Canvas Toolbar */
+    .canvas-toolbar {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+        padding: 10px;
+        background: #f1f3f5;
+        border-radius: 10px;
+        align-items: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -182,6 +199,10 @@ if "last_ai_text" not in st.session_state:
 if "last_related" not in st.session_state:
     st.session_state.last_related = []
 
+# --- Handwriting State ---
+if "drawings" not in st.session_state:
+    st.session_state.drawings = {}  # {(filename, page_idx): json_data}
+
 
 # ==========================================
 # 2. Login Logic
@@ -239,7 +260,6 @@ def get_subject_stats():
     for item in st.session_state.db:
         subj = item.get("subject", "기타")
         if subj not in stats:
-            # 실시간 업데이트 시뮬레이션 제거 (or keep random for demo feel)
             stats[subj] = {"count": 0, "last_updated": "방금 전"}
         stats[subj]["count"] += 1
     return stats
@@ -253,7 +273,6 @@ def get_subject_files(subject):
     return files
 
 def has_jokbo_evidence(related: list[dict]) -> bool:
-    # 유사도 임계값 조정 (0.72는 다소 높을 수 있으므로 상황에 맞게 조정)
     return bool(related) and related[0]["score"] >= 0.70
 
 def ensure_configured():
@@ -262,7 +281,6 @@ def ensure_configured():
 
 @st.cache_data(show_spinner=False)
 def list_text_models(api_key: str):
-    """모델 목록 가져오기 (캐싱 적용)"""
     try:
         genai.configure(api_key=api_key)
         models = genai.list_models()
@@ -285,7 +303,6 @@ def extract_text_from_pdf(uploaded_file):
             pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
     return pages
 
-# Retry decorator for API calls
 @retry.Retry(predicate=retry.if_exception_type(Exception)) 
 def get_embedding_with_retry(text, model="models/text-embedding-004"):
     return genai.embed_content(model=model, content=text, task_type="retrieval_document")["embedding"]
@@ -293,7 +310,7 @@ def get_embedding_with_retry(text, model="models/text-embedding-004"):
 def get_embedding(text: str):
     text = (text or "").strip()
     if not text: return []
-    text = text[:9000] # Safe limit for embedding models
+    text = text[:9000] 
     ensure_configured()
     try:
         return get_embedding_with_retry(text, "models/text-embedding-004")
@@ -301,7 +318,6 @@ def get_embedding(text: str):
         try:
             return get_embedding_with_retry(text, "models/embedding-001")
         except Exception as e:
-            # st.error(f"Embedding failed: {e}") # Debug only
             return []
 
 def filter_db_by_subject(subject: str, db: list[dict]):
@@ -311,7 +327,6 @@ def filter_db_by_subject(subject: str, db: list[dict]):
 
 def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
     if not db: return []
-    # Query embedding should ideally be cached if query is repeated, but text changes often here.
     query_emb = get_embedding(query_text)
     if not query_emb: return []
     valid_items = [item for item in db if item.get("embedding")]
@@ -328,8 +343,6 @@ def generate_with_fallback(prompt: str, model_names: list[str]):
     ensure_configured()
     candidates = model_names if model_names else ["gemini-1.5-flash", "gemini-pro"]
     last_err = None
-    
-    # Generation config to reduce randomness for factual tasks
     config = genai.GenerationConfig(temperature=0.3)
     
     for name in candidates:
@@ -355,7 +368,7 @@ def transcribe_audio_gemini(audio_bytes, api_key):
         st.error(f"음성 인식 실패: {e}")
         return None
 
-# --- Prompt Builders (Kept mostly same, added safety) ---
+# --- Prompt Builders ---
 
 def build_overview_prompt(first_page_text, subject):
     return f"""
@@ -559,7 +572,6 @@ with tab1:
                                     p["embedding"] = emb
                                     p["subject"] = final_subj
                                     new_db.append(p)
-                                # 진행률 미세 업데이트 (선택 사항)
                                 
                             prog_bar.progress((i + 1) / total_files)
                             
@@ -608,7 +620,7 @@ with tab1:
                                     st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
                                     st.markdown(f"<span class='gray-text'>🕒 {subj_data['last_updated']}</span>", unsafe_allow_html=True)
 
-# --- TAB 2: 강의 분석 ---
+# --- TAB 2: 강의 분석 (Handwriting Canvas) ---
 with tab2:
     if st.session_state.t2_selected_subject is None:
         st.markdown("#### 📖 학습할 과목을 선택하세요")
@@ -641,36 +653,76 @@ with tab2:
                     st.session_state.current_page = 0
                     st.session_state.last_page_sig = None
                     st.session_state.chat_history = [] 
+                    st.session_state.drawings = {} # Clear drawings on new file
 
         if st.session_state.lecture_doc:
             doc = st.session_state.lecture_doc
+            
             col_view, col_ai = st.columns([1.8, 1.2])
             
-            # Left: Viewer
+            # --- Left: Viewer (Canvas with Handwriting) ---
             with col_view:
                 with st.container(border=True):
+                    # Nav Toolbar
                     c1, c2, c3 = st.columns([1, 2, 1])
                     with c1:
                         if st.button("◀", use_container_width=True):
                             if st.session_state.current_page > 0: 
                                 st.session_state.current_page -= 1
                                 st.session_state.chat_history = [] 
+                                st.rerun()
                     with c2:
                         st.markdown(f"<div style='text-align:center; font-weight:bold; padding-top:8px;'>Page {st.session_state.current_page+1} / {len(doc)}</div>", unsafe_allow_html=True)
                     with c3:
                         if st.button("▶", use_container_width=True):
                             if st.session_state.current_page < len(doc)-1: 
                                 st.session_state.current_page += 1
-                                st.session_state.chat_history = [] 
+                                st.session_state.chat_history = []
+                                st.rerun()
                     
-                    # Render Image
+                    # Prepare Image & Canvas
                     page = doc.load_page(st.session_state.current_page)
                     pix = page.get_pixmap(dpi=150)
                     pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     p_text = page.get_text() or ""
-                    st.image(pil_image, use_container_width=True)
+                    
+                    # --- Handwriting Controls ---
+                    st.markdown("**✏️ 필기 도구**")
+                    t_c1, t_c2, t_c3 = st.columns([2, 2, 1])
+                    with t_c1:
+                        mode = st.radio("도구", ["펜 (그리기)", "선택/이동 (지우기)"], horizontal=True, label_visibility="collapsed")
+                        drawing_mode = "freedraw" if "펜" in mode else "transform"
+                    with t_c2:
+                        stroke_width = st.slider("굵기", 1, 20, 3, label_visibility="collapsed")
+                    with t_c3:
+                        stroke_color = st.color_picker("색상", "#FF0000", label_visibility="collapsed")
 
-            # Right: AI Assistant
+                    # Load existing drawing
+                    page_key = f"{st.session_state.lecture_filename}_{st.session_state.current_page}"
+                    initial_drawing = st.session_state.drawings.get(page_key)
+
+                    if st_canvas:
+                        canvas_result = st_canvas(
+                            fill_color="rgba(255, 165, 0, 0.3)",
+                            stroke_width=stroke_width,
+                            stroke_color=stroke_color,
+                            background_image=pil_image,
+                            update_streamlit=True,
+                            height=pil_image.height,
+                            width=pil_image.width,
+                            drawing_mode=drawing_mode,
+                            initial_drawing=initial_drawing,
+                            key=f"canvas_{page_key}"
+                        )
+                        
+                        # Save state
+                        if canvas_result.json_data is not None:
+                             st.session_state.drawings[page_key] = canvas_result.json_data
+                    else:
+                        st.image(pil_image, use_container_width=True)
+                        st.warning("Canvas 라이브러리가 설치되지 않았습니다. `pip install streamlit-drawable-canvas`를 실행하세요.")
+
+            # --- Right: AI Assistant (Clean Version) ---
             with col_ai:
                 with st.container(border=True):
                     ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
