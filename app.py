@@ -9,6 +9,24 @@ from PIL import Image
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from streamlit_drawable_canvas import st_canvas  # ✏️ 필기 기능을 위한 라이브러리
+import base64
+from io import BytesIO
+
+# ==========================================
+# 🚑 Monkey Patch for streamlit-drawable-canvas
+# Streamlit 1.40+ 호환성 문제 해결을 위한 패치
+# ==========================================
+import streamlit.elements.image as st_image
+if not hasattr(st_image, 'image_to_url'):
+    def image_to_url(image, width, clamp, channels, output_format, image_id, allow_emoji=False):
+        """
+        Streamlit 1.40+에서 사라진 image_to_url을 대체하는 더미 함수.
+        이미지가 이미 URL(문자열) 형태인 경우 그대로 반환하여 canvas가 처리하게 함.
+        """
+        if isinstance(image, str):
+            return image
+        return "" # Fallback
+    st_image.image_to_url = image_to_url
 
 # ==========================================
 # 0. Page config & Custom CSS
@@ -31,8 +49,14 @@ st.markdown("""
     div[data-baseweb="input"] { background-color: #ffffff !important; border: 1px solid #d1d1d6 !important; color: #1c1c1e !important; }
     div[data-baseweb="input"] input { color: #1c1c1e !important; }
     
-    /* 3. 레이아웃 조정 */
-    .block-container { padding-top: 1.5rem; padding-bottom: 3rem; max-width: 1400px; }
+    /* 3. 레이아웃 조정 (Full Width) */
+    .block-container { 
+        padding-top: 1.5rem; 
+        padding-bottom: 2rem; 
+        padding-left: 2rem !important;
+        padding-right: 2rem !important;
+        max-width: 100% !important; /* 꽉 차게 설정 */
+    }
 
     /* 4. 탭 스타일링 */
     .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; padding: 4px; border-radius: 10px; margin-bottom: 25px; }
@@ -46,6 +70,7 @@ st.markdown("""
         box-shadow: 0 4px 20px rgba(0,0,0,0.03); 
         background-color: white;
         transition: transform 0.2s ease, box-shadow 0.2s ease;
+        padding: 20px;
     }
     div[data-testid="stVerticalBlockBorderWrapper"]:hover {
         transform: translateY(-2px);
@@ -59,18 +84,28 @@ st.markdown("""
     div.stButton > button[kind="primary"] { background-color: #007aff; box-shadow: 0 4px 10px rgba(0,122,255,0.2); }
     div.stButton > button[kind="primary"]:hover { background-color: #0062cc; box-shadow: 0 6px 14px rgba(0,122,255,0.3); }
 
-    /* 7. 로그인 & 기타 */
+    /* 7. 과목 카드 제목 버튼 스타일 */
+    div.stButton > button h2 {
+        font-size: 2rem !important;
+        font-weight: 800 !important;
+        margin: 0 !important;
+        padding: 10px 0 !important;
+        color: #1c1c1e !important;
+        line-height: 1.2 !important;
+    }
+
+    /* 8. 로그인 & 기타 */
     .login-logo { font-size: 5rem; margin-bottom: 10px; animation: bounce 2s infinite; }
     @keyframes bounce { 0%, 20%, 50%, 80%, 100% {transform: translateY(0);} 40% {transform: translateY(-20px);} 60% {transform: translateY(-10px);} }
     .text-bold { font-weight: 700; color: #1c1c1e !important; }
     div[data-testid="stFileUploader"] { padding: 20px; border: 2px dashed #d1d1d6; border-radius: 16px; background-color: #fafafa; }
     div[data-baseweb="toast"] div { color: #ffffff !important; }
     
-    /* 8. 채팅 메시지 스타일 */
+    /* 9. 채팅 메시지 스타일 */
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 9. 족보 아이템 스타일 */
+    /* 10. 족보 아이템 스타일 */
     .jokbo-item {
         background-color: #fffde7;
         border: 1px solid #fff59d;
@@ -88,7 +123,7 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
     
-    /* 10. 사이드바 과목 리스트 스타일 */
+    /* 11. 사이드바 과목 리스트 스타일 */
     .sidebar-subject {
         padding: 10px 15px;
         background-color: white;
@@ -104,7 +139,7 @@ st.markdown("""
     }
     .sidebar-icon { font-size: 1.1rem; }
     
-    /* 11. 캔버스 툴바 스타일 */
+    /* 12. 캔버스 툴바 스타일 */
     div[data-testid="stExpander"] { background-color: white; border-radius: 12px; border: 1px solid #eee; }
 </style>
 """, unsafe_allow_html=True)
@@ -329,6 +364,13 @@ def transcribe_audio_gemini(audio_bytes, api_key):
         st.error(f"음성 인식 실패: {e}")
         return None
 
+def pil_to_base64(image):
+    """PIL 이미지를 Base64 URL로 변환 (canvas background용)"""
+    buffered = BytesIO()
+    image.save(buffered, format="PNG")
+    img_str = base64.b64encode(buffered.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
+
 # --- New Prompts for Specialized Analysis ---
 
 def build_overview_prompt(first_page_text, subject):
@@ -544,7 +586,8 @@ with tab1:
                                 with c_head_1:
                                     if is_editing: new_name_input = st.text_input("새 이름", value=subj_name, key=f"edit_in_{subj_name}", label_visibility="collapsed")
                                     else:
-                                        if st.button(f"### {subj_name}", key=f"btn_view_{subj_name}", help="클릭하여 파일 목록 보기"):
+                                        # 과목명 클릭 시 상세 보기로 이동 (버튼 스타일) - h2 태그로 꽉 차게
+                                        if st.button(f"## {subj_name}", key=f"btn_view_{subj_name}", help="클릭하여 파일 목록 보기"):
                                             st.session_state.subject_detail_view = subj_name
                                             st.rerun()
                                 with c_head_2:
@@ -574,7 +617,8 @@ with tab2:
              cols = st.columns(3)
              for i, subj in enumerate(subjects):
                  with cols[i % 3]:
-                     btn_label = f"📘 {subj}\n\n📄 {stats[subj]['count']} pages"
+                     # 과목 선택 카드도 크게
+                     btn_label = f"## {subj}\n\n📄 {stats[subj]['count']} pages"
                      if st.button(btn_label, key=f"t2_sel_{subj}", use_container_width=True):
                          st.session_state.t2_selected_subject = subj
                          st.rerun()
@@ -647,12 +691,15 @@ with tab2:
                         # 캔버스 ID 생성 (페이지별 고유)
                         canvas_key = f"canvas_{st.session_state.lecture_filename}_{st.session_state.current_page}"
                         initial_drawing = st.session_state.drawings.get(canvas_key)
+                        
+                        # 🖼️ 이미지를 Base64로 변환하여 전달 (Patch 적용됨)
+                        bg_image_url = pil_to_base64(pil_image)
 
                         canvas_result = st_canvas(
                             fill_color="rgba(255, 165, 0, 0.3)",
                             stroke_width=stroke_width,
                             stroke_color=stroke_color,
-                            background_image=pil_image,
+                            background_image=bg_image_url,
                             update_streamlit=True,
                             height=pil_image.height,
                             width=pil_image.width,
