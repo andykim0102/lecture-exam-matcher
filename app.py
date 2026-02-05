@@ -16,11 +16,18 @@ st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
 # 실제 앱 느낌을 위한 커스텀 CSS 주입
 st.markdown("""
 <style>
-    /* 전체 폰트 적용 */
+    /* 전체 폰트 및 배경 설정 */
     html, body, [class*="css"]  {
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        background-color: #f8f9fc;
     }
     
+    /* 메인 컨테이너 패딩 조절 */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+
     /* 로그인 박스 스타일 */
     .login-container {
         display: flex;
@@ -31,58 +38,89 @@ st.markdown("""
     
     /* 탭 스타일 개선 */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
+        gap: 8px;
+        background-color: transparent;
+        padding-bottom: 10px;
     }
     .stTabs [data-baseweb="tab"] {
-        height: 50px;
-        border-radius: 4px 4px 0 0;
-        padding: 0 20px;
-        background-color: #f8f9fa;
-        border: none;
-        font-weight: 500;
+        height: 45px;
+        border-radius: 8px;
+        padding: 0 24px;
+        background-color: #ffffff;
+        border: 1px solid #e0e0e0;
+        font-weight: 600;
+        color: #666;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        margin-right: 5px;
     }
     .stTabs [aria-selected="true"] {
+        background-color: #4b89dc !important;
+        color: #ffffff !important;
+        border: none;
+    }
+    
+    /* 과목 카드 스타일 (Tab 1) */
+    .subject-card {
+        background-color: white;
+        border-radius: 12px;
+        padding: 20px;
+        border: 1px solid #eee;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+        transition: transform 0.2s, box-shadow 0.2s;
+        text-align: center;
+        height: 100%;
+    }
+    .subject-card:hover {
+        transform: translateY(-3px);
+        box-shadow: 0 8px 15px rgba(0,0,0,0.08);
+        border-color: #4b89dc;
+    }
+    .subject-icon { font-size: 2rem; margin-bottom: 10px; }
+    .subject-title { font-size: 1.1rem; font-weight: 700; color: #333; margin-bottom: 5px; }
+    .subject-count { font-size: 0.9rem; color: #888; background: #f1f3f5; padding: 4px 10px; border-radius: 12px; display: inline-block; }
+
+    /* 콘텐츠 패널 (Tab 2, 3 - 투명도 개선) */
+    .content-panel {
         background-color: #ffffff;
-        border-bottom: 2px solid #4b89dc;
-        color: #4b89dc;
+        padding: 25px;
+        border-radius: 16px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+        border: 1px solid #f0f0f0;
+        margin-bottom: 20px;
     }
     
     /* 버튼 스타일 */
     div.stButton > button {
-        border-radius: 6px;
-        height: 2.8rem;
+        border-radius: 8px;
+        height: 3rem;
         font-weight: 600;
-        border: 1px solid #e0e0e0;
+        border: none;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        transition: all 0.2s;
+    }
+    div.stButton > button:hover {
+        opacity: 0.9;
+        transform: translateY(-1px);
     }
     
     /* 사이드바 프로필 영역 */
     .profile-box {
         padding: 20px;
-        background-color: #e3f2fd;
-        border-radius: 10px;
+        background-color: #ffffff;
+        border-radius: 12px;
         margin-bottom: 20px;
         display: flex;
         align-items: center;
         gap: 15px;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+        border: 1px solid #f0f0f0;
     }
-    .profile-text h4 {
-        margin: 0;
-        color: #1565c0;
-        font-size: 1rem;
-    }
-    .profile-text p {
-        margin: 0;
-        color: #5c6bc0;
-        font-size: 0.8rem;
-    }
+    .profile-text h4 { margin: 0; color: #1565c0; font-size: 1rem; font-weight: 700; }
+    .profile-text p { margin: 0; color: #5c6bc0; font-size: 0.8rem; }
     
     /* 메인 헤더 */
-    .main-header {
-        font-size: 1.8rem;
-        font-weight: 700;
-        color: #333;
-        margin-bottom: 5px;
-    }
+    .main-header { font-size: 2rem; font-weight: 800; color: #2c3e50; margin-bottom: 5px; letter-spacing: -0.5px; }
+    .sub-header { color: #7f8c8d; font-size: 1rem; margin-bottom: 25px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -135,21 +173,22 @@ if "last_related" not in st.session_state:
 # 2. Login Logic
 # ==========================================
 def login():
-    col1, col2, col3 = st.columns([1, 1.5, 1])
+    col1, col2, col3 = st.columns([1, 1.2, 1])
     
     with col2:
         st.markdown("<br><br>", unsafe_allow_html=True)
         st.markdown(
             """
-            <div style="text-align: center; margin-bottom: 30px;">
+            <div style="text-align: center; margin-bottom: 30px; background: white; padding: 40px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.08);">
                 <div style="font-size: 4rem; margin-bottom: 10px;">🩺</div>
-                <h1 style="color: #2c3e50;">Med-Study OS</h1>
-                <p style="color: #7f8c8d;">의대생을 위한 스마트 학습 어시스턴트</p>
-            </div>
+                <h1 style="color: #2c3e50; font-weight: 800;">Med-Study OS</h1>
+                <p style="color: #95a5a6;">의대생을 위한 스마트 학습 어시스턴트</p>
+                <div style="margin-top: 30px;"></div>
             """, 
             unsafe_allow_html=True
         )
         
+        # 폼은 HTML 블록 밖에서 별도로 렌더링 (Streamlit 제약)
         with st.form("login_form"):
             st.markdown("##### 🔐 로그인")
             username = st.text_input("아이디", placeholder="admin")
@@ -166,6 +205,7 @@ def login():
                 else:
                     st.error("비밀번호가 틀렸습니다. (Demo: 1234)")
         
+        st.markdown("</div>", unsafe_allow_html=True)
         st.markdown(
             "<div style='text-align:center; margin-top:15px; color:#aaa; font-size:0.85rem;'>Demo Access: admin / 1234</div>", 
             unsafe_allow_html=True
@@ -195,7 +235,6 @@ def list_text_models(api_key: str):
         models = genai.list_models()
         return [m.name for m in models if "generateContent" in getattr(m, "supported_generation_methods", [])]
     except Exception as e:
-        # 모델 목록 조회 실패 시 빈 리스트 반환하여 호출 측에서 처리
         return []
 
 def pick_best_text_model(model_names: list[str]):
@@ -227,27 +266,20 @@ with st.sidebar:
     api_key_input = st.text_input("Gemini API Key", type="password", key="api_key_input")
     
     if api_key_input:
-        # 공백 제거 처리 (복사/붙여넣기 실수 방지)
         api_key = api_key_input.strip()
-        
         try:
             st.session_state.api_key = api_key
             genai.configure(api_key=api_key)
             
-            # 모델 리스트 조회 시도
             available_models = list_text_models(api_key)
-            
             if not available_models:
-                # 모델 리스트를 못 가져온 경우 (권한 문제 등)
                 st.session_state.api_key_ok = False
                 st.error("API 연결 실패: 유효하지 않은 키이거나 모델 목록 권한이 없습니다.")
-                st.caption("Google AI Studio에서 키를 다시 확인해주세요.")
             else:
                 st.session_state.api_key_ok = True
                 st.session_state.text_models = available_models
                 st.session_state.best_text_model = pick_best_text_model(available_models)
                 st.success(f"연결됨: {st.session_state.best_text_model}")
-                
         except Exception as e:
             st.session_state.api_key_ok = False
             st.error(f"오류 발생: {str(e)}")
@@ -269,10 +301,8 @@ with st.sidebar:
 
 
 # 메인 헤더
-col_h1, col_h2 = st.columns([3, 1])
-with col_h1:
-    st.markdown('<div class="main-header">Med-Study Dashboard</div>', unsafe_allow_html=True)
-    st.caption("강의 자료와 족보 데이터를 연결하여 학습 효율을 극대화하세요.")
+st.markdown('<div class="main-header">Med-Study Dashboard</div>', unsafe_allow_html=True)
+st.markdown('<div class="sub-header">강의 자료와 족보 데이터를 연결하여 학습 효율을 극대화하세요.</div>', unsafe_allow_html=True)
 
 
 # Settings & Helpers
@@ -326,9 +356,7 @@ def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
 
 def generate_with_fallback(prompt: str, model_names: list[str]):
     ensure_configured()
-    # 모델 목록이 비어있을 경우 기본 모델 시도
     candidates = model_names if model_names else ["gemini-1.5-flash", "gemini-pro"]
-    
     last_err = None
     for name in candidates:
         try:
@@ -399,56 +427,89 @@ def chunk_transcript(text: str, max_chars: int = 900):
 # ==========================================
 st.markdown("<br>", unsafe_allow_html=True)
 tab1, tab2, tab3 = st.tabs(
-    ["📂 족보 학습 (Upload)", "📖 강의 분석 (Viewer)", "🎙️ 전사 분석 (Transcript)"]
+    ["📂 족보 학습 (Jokbo DB)", "📖 강의 분석 (Lecture)", "🎙️ 전사 분석 (Transcript)"]
 )
 
-# --- TAB 1: Upload ---
+# --- TAB 1: Upload & DB Management ---
 with tab1:
-    st.markdown("#### 📂 과목별 족보 데이터 구축")
-    st.info("💡 족보 파일을 업로드하여 AI에게 학습시킵니다. 과목별로 분리하여 관리할 수 있습니다.")
+    st.markdown("#### 📂 내 학습 데이터베이스")
+    
+    # DB 통계 및 카드형 UI 표시
+    subjects = sorted({x.get("subject", "기타") for x in st.session_state.db})
+    
+    if not subjects:
+        st.info("아직 학습된 족보 데이터가 없습니다. 아래에서 파일을 업로드하여 과목을 추가하세요.")
+    else:
+        # 과목별 페이지 수 계산
+        subj_counts = {}
+        for x in st.session_state.db:
+            s = x.get("subject", "기타")
+            subj_counts[s] = subj_counts.get(s, 0) + 1
+            
+        # 카드 그리드 렌더링
+        cols = st.columns(4)
+        for i, subj in enumerate(subjects):
+            with cols[i % 4]:
+                st.markdown(
+                    f"""
+                    <div class="subject-card">
+                        <div class="subject-icon">📚</div>
+                        <div class="subject-title">{subj}</div>
+                        <div class="subject-count">{subj_counts[subj]} pages</div>
+                    </div>
+                    """, 
+                    unsafe_allow_html=True
+                )
+    
+    st.markdown("---")
+    
+    # 업로드 섹션 디자인 개선
+    st.markdown("##### ➕ 새로운 족보 추가하기")
+    with st.container():
+        st.markdown('<div class="content-panel" style="padding: 20px;">', unsafe_allow_html=True)
+        c1, c2 = st.columns([1, 2])
+        with c1:
+            subject_for_upload = st.selectbox("과목 선택", ["해부학", "생리학", "약리학", "기타(직접입력)"], index=1)
+        with c2:
+            subject_custom = st.text_input("과목명 직접 입력", disabled=(subject_for_upload != "기타(직접입력)"), placeholder="예: 병리학")
 
-    c1, c2 = st.columns([1, 2])
-    with c1:
-        subject_for_upload = st.selectbox("과목 선택", ["해부학", "생리학", "약리학", "기타(직접입력)"], index=1)
-    with c2:
-        subject_custom = st.text_input("과목명 직접 입력", disabled=(subject_for_upload != "기타(직접입력)"), placeholder="예: 병리학")
+        subject_final = subject_custom.strip() if subject_for_upload == "기타(직접입력)" else subject_for_upload
+        if not subject_final: subject_final = "기타"
 
-    subject_final = subject_custom.strip() if subject_for_upload == "기타(직접입력)" else subject_for_upload
-    if not subject_final: subject_final = "기타"
+        files = st.file_uploader("족보 PDF 파일 선택 (다중 선택 가능)", type="pdf", accept_multiple_files=True)
 
-    files = st.file_uploader("족보 PDF 파일 선택 (다중 선택 가능)", type="pdf", accept_multiple_files=True)
-
-    col_a, col_b = st.columns([1, 2])
-    with col_a:
-        max_pages = st.number_input("파일당 최대 학습 페이지", 1, 500, 60)
-    with col_b:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🚀 DB 학습 시작", type="primary"):
-            if not st.session_state.api_key_ok:
-                st.error("API Key 설정이 필요합니다.")
-            elif not files:
-                st.warning("파일을 업로드해주세요.")
-            else:
-                bar = st.progress(0)
-                status = st.empty()
-                new_db = []
-                for i, f in enumerate(files):
-                    status.text(f"Processing: {f.name}...")
-                    pages = extract_text_from_pdf(f)[:int(max_pages)]
-                    for p in pages:
-                        emb = get_embedding(p["text"])
-                        if emb:
-                            p["embedding"] = emb
-                            p["subject"] = subject_final
-                            new_db.append(p)
-                        time.sleep(0.5)
-                    bar.progress((i+1)/len(files))
-                
-                st.session_state.db.extend(new_db)
-                status.success("✅ 학습 완료!")
-                st.toast(f"{len(new_db)} 페이지 학습 완료", icon="🎉")
-                time.sleep(1)
-                st.rerun()
+        col_a, col_b = st.columns([1, 2])
+        with col_a:
+            max_pages = st.number_input("파일당 최대 학습 페이지", 1, 500, 60)
+        with col_b:
+            st.markdown("<br>", unsafe_allow_html=True)
+            if st.button("🚀 학습 시작 (Upload)", type="primary"):
+                if not st.session_state.api_key_ok:
+                    st.error("API Key 설정이 필요합니다.")
+                elif not files:
+                    st.warning("파일을 업로드해주세요.")
+                else:
+                    bar = st.progress(0)
+                    status = st.empty()
+                    new_db = []
+                    for i, f in enumerate(files):
+                        status.text(f"Processing: {f.name}...")
+                        pages = extract_text_from_pdf(f)[:int(max_pages)]
+                        for p in pages:
+                            emb = get_embedding(p["text"])
+                            if emb:
+                                p["embedding"] = emb
+                                p["subject"] = subject_final
+                                new_db.append(p)
+                            time.sleep(0.5)
+                        bar.progress((i+1)/len(files))
+                    
+                    st.session_state.db.extend(new_db)
+                    status.success("✅ 학습 완료!")
+                    st.toast(f"{len(new_db)} 페이지 학습 완료", icon="🎉")
+                    time.sleep(1)
+                    st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # --- TAB 2: Viewer ---
 with tab2:
@@ -459,12 +520,14 @@ with tab2:
     subjects = sorted({x.get("subject", "") for x in st.session_state.db})
     subj_opts = ["전체"] + (subjects if subjects else [])
     
-    c_sel, c_up = st.columns([1, 2])
-    subj_pick = c_sel.selectbox("분석 과목", subj_opts, key="t2_sub")
-    lec_file = c_up.file_uploader("강의 PDF 업로드", type="pdf")
-    
-    debug_show = st.toggle("매칭 근거 보기", False)
-    st.markdown("---")
+    # 상단 컨트롤 바
+    with st.container():
+        st.markdown('<div class="content-panel" style="padding: 15px; margin-bottom: 10px;">', unsafe_allow_html=True)
+        c_sel, c_up = st.columns([1, 2])
+        subj_pick = c_sel.selectbox("분석 과목", subj_opts, key="t2_sub")
+        lec_file = c_up.file_uploader("강의 PDF 업로드", type="pdf")
+        debug_show = st.toggle("매칭 근거 보기 (Debug)", False)
+        st.markdown('</div>', unsafe_allow_html=True)
 
     if lec_file:
         if st.session_state.lecture_filename != lec_file.name:
@@ -474,14 +537,18 @@ with tab2:
             st.session_state.last_page_sig = None
         
         doc = st.session_state.lecture_doc
+        
+        # 메인 뷰어 영역 (흰색 패널로 감싸기)
+        st.markdown('<div class="content-panel">', unsafe_allow_html=True)
         col_view, col_right = st.columns([1.2, 1])
         
         with col_view:
+            st.markdown("##### 📄 PDF Viewer")
             c_prev, c_page, c_next = st.columns([1, 2, 1])
-            if c_prev.button("◀", key="prev"):
+            if c_prev.button("◀ Prev", key="prev"):
                 if st.session_state.current_page > 0: st.session_state.current_page -= 1
             c_page.markdown(f"<center>{st.session_state.current_page+1} / {len(doc)}</center>", unsafe_allow_html=True)
-            if c_next.button("▶", key="next"):
+            if c_next.button("Next ▶", key="next"):
                 if st.session_state.current_page < len(doc)-1: st.session_state.current_page += 1
             
             page = doc.load_page(st.session_state.current_page)
@@ -490,7 +557,7 @@ with tab2:
             page_text = page.get_text() or ""
             
         with col_right:
-            st.markdown("### 🧑‍🏫 AI 조교")
+            st.markdown("##### 🧑‍🏫 AI 조교 브리핑")
             if not st.session_state.db:
                 st.error("DB 없음")
             elif not page_text.strip():
@@ -505,56 +572,75 @@ with tab2:
                 
                 rel = st.session_state.last_related
                 if not has_jokbo_evidence(rel):
-                    st.info("관련 족보 내용이 없습니다.")
+                    st.info("💡 이 페이지와 관련된 족보 내용이 없습니다.")
+                    st.caption("가볍게 읽고 넘어가셔도 좋습니다.")
                 else:
                     ai_sig = (p_sig, subj_pick)
                     if ai_sig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
-                        with st.spinner("분석 중..."):
+                        with st.spinner("AI가 족보를 분석 중입니다..."):
                             prompt = build_ta_prompt(page_text, rel, subj_pick)
                             res, _ = generate_with_fallback(prompt, st.session_state.text_models)
                             st.session_state.last_ai_text = res
                             st.session_state.last_ai_sig = ai_sig
                     
-                    st.markdown(f"""<div style="background:#f8f9fa;padding:15px;border-radius:8px;border-left:4px solid #4b89dc;">
-                    {st.session_state.last_ai_text}</div>""", unsafe_allow_html=True)
+                    st.markdown(f"""
+                        <div style="background:#f8f9fa; padding:15px; border-radius:8px; border-left:4px solid #4b89dc; font-size:0.95rem; line-height:1.6;">
+                        {st.session_state.last_ai_text}
+                        </div>
+                        """, unsafe_allow_html=True)
                     
                     if debug_show:
-                        st.caption("근거:")
+                        st.divider()
+                        st.caption("🔍 근거 자료:")
                         for r in rel[:3]: st.text(f"[{r['score']:.2f}] {r['content']['source']}")
+        st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.info("강의 PDF를 업로드하세요.")
+        st.info("상단에서 강의 PDF 파일을 업로드해주세요.")
 
 # --- TAB 3: Transcript ---
 with tab3:
     st.markdown("#### 🎙️ 강의 녹음/전사 분석")
+    
+    # 흰색 패널로 전체 감싸기
+    st.markdown('<div class="content-panel">', unsafe_allow_html=True)
     
     c_sub, c_dummy = st.columns([1, 2])
     subj_pick_t3 = c_sub.selectbox("분석 과목", ["전체"] + sorted({x.get("subject", "") for x in st.session_state.db}), key="t3_sub")
     
     col_t1, col_t2 = st.columns(2)
     with col_t1:
+        st.markdown("##### 1. 전사 텍스트 입력")
         txt_file = st.file_uploader("전사 파일(.txt)", type="txt")
-        raw_txt = st.text_area("또는 텍스트 입력", height=200)
-        if st.button("✨ 분석 시작", type="primary"):
+        raw_txt = st.text_area("또는 텍스트 직접 입력", height=200, placeholder="강의 내용을 여기에 붙여넣으세요...")
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("✨ 족보 매칭 분석 시작", type="primary"):
             target_txt = (txt_file.getvalue().decode() if txt_file else raw_txt).strip()
             if not target_txt:
                 st.error("내용을 입력하세요.")
             elif not st.session_state.api_key_ok:
                 st.error("API Key 확인 필요")
             else:
-                db_sub = filter_db_by_subject(subj_pick_t3, st.session_state.db)
-                chunks = chunk_transcript(target_txt)[:10]
-                rels = []
-                for ch in chunks:
-                    rels.append(find_relevant_jokbo(ch, db_sub, top_k=3))
-                
-                prompt = build_transcript_prompt(chunks, rels, subj_pick_t3)
-                res, _ = generate_with_fallback(prompt, st.session_state.text_models)
-                st.session_state.tr_res = res
+                with st.spinner("전사 텍스트를 분석하고 족보와 대조 중..."):
+                    db_sub = filter_db_by_subject(subj_pick_t3, st.session_state.db)
+                    chunks = chunk_transcript(target_txt)[:10]
+                    rels = []
+                    for ch in chunks:
+                        rels.append(find_relevant_jokbo(ch, db_sub, top_k=3))
+                    
+                    prompt = build_transcript_prompt(chunks, rels, subj_pick_t3)
+                    res, _ = generate_with_fallback(prompt, st.session_state.text_models)
+                    st.session_state.tr_res = res
+                st.success("분석 완료!")
                 
     with col_t2:
+        st.markdown("##### 2. 족보 포인트 요약 노트")
         if "tr_res" in st.session_state:
-            st.markdown(f"""<div style="background:#fff;padding:20px;border:1px solid #ddd;border-radius:8px;">
-            {st.session_state.tr_res}</div>""", unsafe_allow_html=True)
+            st.markdown(f"""
+            <div style="background:#ffffff; padding:20px; border:1px solid #eee; border-radius:8px; min-height:300px;">
+            {st.session_state.tr_res}
+            </div>""", unsafe_allow_html=True)
         else:
-            st.info("왼쪽에서 내용을 입력하고 분석을 시작하세요.")
+            st.info("왼쪽에서 텍스트를 입력하고 분석 버튼을 눌러주세요.")
+            
+    st.markdown('</div>', unsafe_allow_html=True)
