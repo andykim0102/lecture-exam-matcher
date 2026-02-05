@@ -1,4 +1,4 @@
-# app.py (Optimized + Handwriting)
+# app.py (Optimized - No Canvas)
 import time
 import re
 import random
@@ -9,12 +9,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 import streamlit as st
 import google.generativeai as genai
 from google.api_core import retry  # For robust API calls
-
-# Try importing st_canvas, handle if missing
-try:
-    from streamlit_drawable_canvas import st_canvas
-except ImportError:
-    st_canvas = None
 
 # ==========================================
 # 0. Page config & Custom CSS
@@ -41,8 +35,8 @@ st.markdown("""
     .block-container { 
         padding-top: 1rem !important; 
         padding-bottom: 2rem !important; 
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
+        padding-left: 1rem !important; 
+        padding-right: 1rem !important; 
         max-width: 100% !important;
     }
     header[data-testid="stHeader"] { display: none; }
@@ -126,17 +120,6 @@ st.markdown("""
         gap: 8px;
     }
     .sidebar-icon { font-size: 1.1rem; }
-    
-    /* 12. Canvas Toolbar */
-    .canvas-toolbar {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 10px;
-        padding: 10px;
-        background: #f1f3f5;
-        border-radius: 10px;
-        align-items: center;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -198,10 +181,6 @@ if "last_ai_text" not in st.session_state:
 
 if "last_related" not in st.session_state:
     st.session_state.last_related = []
-
-# --- Handwriting State ---
-if "drawings" not in st.session_state:
-    st.session_state.drawings = {}  # {(filename, page_idx): json_data}
 
 
 # ==========================================
@@ -620,7 +599,7 @@ with tab1:
                                     st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
                                     st.markdown(f"<span class='gray-text'>🕒 {subj_data['last_updated']}</span>", unsafe_allow_html=True)
 
-# --- TAB 2: 강의 분석 (Handwriting Canvas) ---
+# --- TAB 2: 강의 분석 (No Canvas) ---
 with tab2:
     if st.session_state.t2_selected_subject is None:
         st.markdown("#### 📖 학습할 과목을 선택하세요")
@@ -653,14 +632,13 @@ with tab2:
                     st.session_state.current_page = 0
                     st.session_state.last_page_sig = None
                     st.session_state.chat_history = [] 
-                    st.session_state.drawings = {} # Clear drawings on new file
 
         if st.session_state.lecture_doc:
             doc = st.session_state.lecture_doc
             
             col_view, col_ai = st.columns([1.8, 1.2])
             
-            # --- Left: Viewer (Canvas with Handwriting) ---
+            # --- Left: Viewer (Standard Image) ---
             with col_view:
                 with st.container(border=True):
                     # Nav Toolbar
@@ -680,47 +658,13 @@ with tab2:
                                 st.session_state.chat_history = []
                                 st.rerun()
                     
-                    # Prepare Image & Canvas
+                    # Prepare Image
                     page = doc.load_page(st.session_state.current_page)
                     pix = page.get_pixmap(dpi=150)
                     pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     p_text = page.get_text() or ""
                     
-                    # --- Handwriting Controls ---
-                    st.markdown("**✏️ 필기 도구**")
-                    t_c1, t_c2, t_c3 = st.columns([2, 2, 1])
-                    with t_c1:
-                        mode = st.radio("도구", ["펜 (그리기)", "선택/이동 (지우기)"], horizontal=True, label_visibility="collapsed")
-                        drawing_mode = "freedraw" if "펜" in mode else "transform"
-                    with t_c2:
-                        stroke_width = st.slider("굵기", 1, 20, 3, label_visibility="collapsed")
-                    with t_c3:
-                        stroke_color = st.color_picker("색상", "#FF0000", label_visibility="collapsed")
-
-                    # Load existing drawing
-                    page_key = f"{st.session_state.lecture_filename}_{st.session_state.current_page}"
-                    initial_drawing = st.session_state.drawings.get(page_key)
-
-                    if st_canvas:
-                        canvas_result = st_canvas(
-                            fill_color="rgba(255, 165, 0, 0.3)",
-                            stroke_width=stroke_width,
-                            stroke_color=stroke_color,
-                            background_image=pil_image,
-                            update_streamlit=True,
-                            height=pil_image.height,
-                            width=pil_image.width,
-                            drawing_mode=drawing_mode,
-                            initial_drawing=initial_drawing,
-                            key=f"canvas_{page_key}"
-                        )
-                        
-                        # Save state
-                        if canvas_result.json_data is not None:
-                             st.session_state.drawings[page_key] = canvas_result.json_data
-                    else:
-                        st.image(pil_image, use_container_width=True)
-                        st.warning("Canvas 라이브러리가 설치되지 않았습니다. `pip install streamlit-drawable-canvas`를 실행하세요.")
+                    st.image(pil_image, use_container_width=True)
 
             # --- Right: AI Assistant (Clean Version) ---
             with col_ai:
