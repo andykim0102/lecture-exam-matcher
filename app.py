@@ -187,6 +187,22 @@ if not st.session_state.logged_in:
 
 # --- 로그인 이후 UI ---
 
+# AI Helpers
+@st.cache_data(show_spinner=False)
+def list_text_models(api_key: str):
+    try:
+        genai.configure(api_key=api_key)
+        models = genai.list_models()
+        return [m.name for m in models if "generateContent" in getattr(m, "supported_generation_methods", [])]
+    except Exception as e:
+        # 모델 목록 조회 실패 시 빈 리스트 반환하여 호출 측에서 처리
+        return []
+
+def pick_best_text_model(model_names: list[str]):
+    if not model_names: return None
+    flash = [m for m in model_names if "flash" in m.lower()]
+    return flash[0] if flash else model_names[0]
+
 # 사이드바
 with st.sidebar:
     st.markdown(
@@ -208,23 +224,33 @@ with st.sidebar:
     st.markdown("---")
     st.caption("⚙️ SYSTEM SETTINGS")
 
-    api_key = st.text_input("Gemini API Key", type="password", key="api_key_input")
-    if api_key:
+    api_key_input = st.text_input("Gemini API Key", type="password", key="api_key_input")
+    
+    if api_key_input:
+        # 공백 제거 처리 (복사/붙여넣기 실수 방지)
+        api_key = api_key_input.strip()
+        
         try:
             st.session_state.api_key = api_key
             genai.configure(api_key=api_key)
+            
+            # 모델 리스트 조회 시도
             available_models = list_text_models(api_key)
+            
             if not available_models:
+                # 모델 리스트를 못 가져온 경우 (권한 문제 등)
                 st.session_state.api_key_ok = False
-                st.error("사용 가능한 모델 없음")
+                st.error("API 연결 실패: 유효하지 않은 키이거나 모델 목록 권한이 없습니다.")
+                st.caption("Google AI Studio에서 키를 다시 확인해주세요.")
             else:
                 st.session_state.api_key_ok = True
                 st.session_state.text_models = available_models
                 st.session_state.best_text_model = pick_best_text_model(available_models)
                 st.success(f"연결됨: {st.session_state.best_text_model}")
+                
         except Exception as e:
             st.session_state.api_key_ok = False
-            st.error("API Key 오류")
+            st.error(f"오류 발생: {str(e)}")
     else:
         st.info("AI 기능을 위해 키를 입력하세요.")
 
@@ -298,26 +324,21 @@ def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
     top_idxs = np.argsort(sims)[::-1][:top_k]
     return [{"score": float(sims[i]), "content": valid_items[i]} for i in top_idxs]
 
-@st.cache_data(show_spinner=False)
-def list_text_models(api_key: str):
-    genai.configure(api_key=api_key)
-    models = genai.list_models()
-    return [m.name for m in models if "generateContent" in getattr(m, "supported_generation_methods", [])]
-
-def pick_best_text_model(model_names: list[str]):
-    if not model_names: return None
-    flash = [m for m in model_names if "flash" in m.lower()]
-    return flash[0] if flash else model_names[0]
-
 def generate_with_fallback(prompt: str, model_names: list[str]):
     ensure_configured()
-    for name in model_names:
+    # 모델 목록이 비어있을 경우 기본 모델 시도
+    candidates = model_names if model_names else ["gemini-1.5-flash", "gemini-pro"]
+    
+    last_err = None
+    for name in candidates:
         try:
             model = genai.GenerativeModel(name)
             res = model.generate_content(prompt)
             if res.text: return res.text, name
-        except: continue
-    raise Exception("All models failed")
+        except Exception as e: 
+            last_err = e
+            continue
+    raise Exception(f"모든 모델 시도 실패: {str(last_err)}")
 
 def build_ta_prompt(lecture_text: str, related: list[dict], subject: str):
     ctx = "\n".join([f"- [{r['content']['source']} p{r['content']['page']}] {r['content']['text'][:400]}" for r in related[:3]])
