@@ -17,23 +17,47 @@ st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
 # 실제 앱 느낌을 위한 커스텀 CSS 주입
 st.markdown("""
 <style>
-    /* 1. 기본 배경 및 폰트 설정 (Pure White App Style) */
+    /* 1. 강제 라이트 모드 적용 (다크모드 사용자 대응) */
     .stApp {
         background-color: #ffffff;
     }
-    html, body, [class*="css"]  {
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        color: #1c1c1e;
+    
+    /* 모든 텍스트 강제 검정색 (헤더, 라벨, 본문 등) */
+    h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown {
+        color: #1c1c1e !important;
     }
     
-    /* 2. 상단 여백 제거하여 앱 헤더처럼 보이게 하기 */
+    /* 예외: 옅은 회색 텍스트 (설명 문구 등) */
+    .gray-text, .text-sm, .login-desc {
+        color: #8e8e93 !important;
+    }
+    
+    /* 예외: 버튼 텍스트 색상 복구 */
+    div.stButton > button p {
+        color: #007aff !important; /* 기본 버튼 파란색 */
+    }
+    div.stButton > button[kind="primary"] p {
+        color: #ffffff !important; /* Primary 버튼 흰색 */
+    }
+
+    /* 2. 입력창(Input) 스타일 강제 수정 (다크모드에서 어두운 배경 되는 것 방지) */
+    div[data-baseweb="input"] {
+        background-color: #ffffff !important;
+        border: 1px solid #d1d1d6 !important;
+        color: #1c1c1e !important;
+    }
+    div[data-baseweb="input"] input {
+        color: #1c1c1e !important;
+    }
+    
+    /* 3. 상단 여백 제거하여 앱 헤더처럼 보이게 하기 */
     .block-container {
         padding-top: 1.5rem;
         padding-bottom: 3rem;
         max-width: 1200px;
     }
 
-    /* 3. 탭 스타일링 (iOS Segmented Control 느낌) */
+    /* 4. 탭 스타일링 (iOS Segmented Control 느낌) */
     .stTabs [data-baseweb="tab-list"] {
         gap: 0px;
         background-color: #f2f2f7;
@@ -48,8 +72,8 @@ st.markdown("""
         background-color: transparent;
         border: none;
         font-weight: 500;
-        color: #8e8e93;
-        flex-grow: 1; /* 탭 균등 분할 */
+        color: #8e8e93 !important; /* 탭 기본 텍스트 회색 */
+        flex-grow: 1;
     }
     .stTabs [aria-selected="true"] {
         background-color: #ffffff !important;
@@ -58,7 +82,7 @@ st.markdown("""
         font-weight: 600;
     }
 
-    /* 4. 카드 컨테이너 스타일 (Streamlit Native Container with Border) */
+    /* 5. 카드 컨테이너 스타일 */
     div[data-testid="stVerticalBlock"] > div[data-testid="stVerticalBlockBorderWrapper"] {
         border-radius: 16px;
         border: 1px solid #f0f0f0;
@@ -66,14 +90,13 @@ st.markdown("""
         background-color: white;
     }
 
-    /* 5. 버튼 스타일 (앱 버튼처럼) */
+    /* 6. 버튼 스타일 */
     div.stButton > button {
         border-radius: 10px;
         font-weight: 600;
         border: none;
         box-shadow: none;
         background-color: #f2f2f7;
-        color: #007aff; /* iOS Blue */
         transition: all 0.2s;
     }
     div.stButton > button:hover {
@@ -83,29 +106,28 @@ st.markdown("""
     /* Primary 버튼 강조 */
     div.stButton > button[kind="primary"] {
         background-color: #007aff;
-        color: white;
     }
     div.stButton > button[kind="primary"]:hover {
         background-color: #0062cc;
     }
 
-    /* 6. 로그인 화면 스타일 */
+    /* 7. 로그인 화면 스타일 */
     .login-logo { font-size: 5rem; margin-bottom: 10px; animation: bounce 2s infinite; }
     @keyframes bounce { 0%, 20%, 50%, 80%, 100% {transform: translateY(0);} 40% {transform: translateY(-20px);} 60% {transform: translateY(-10px);} }
     
-    /* 7. 텍스트 유틸리티 */
-    .text-sm { font-size: 0.85rem; color: #8e8e93; }
-    .text-bold { font-weight: 700; color: #1c1c1e; }
-    .badge { 
-        background-color: #eef2ff; color: #4b89dc; 
-        padding: 4px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 600; 
-    }
+    /* 8. 텍스트 유틸리티 */
+    .text-bold { font-weight: 700; color: #1c1c1e !important; }
 
-    /* 8. 파일 업로더 깔끔하게 */
+    /* 9. 파일 업로더 깔끔하게 */
     div[data-testid="stFileUploader"] {
         padding: 15px;
         border: 1px dashed #d1d1d6;
         border-radius: 12px;
+    }
+    
+    /* 10. Toast 메시지 텍스트 복구 */
+    div[data-baseweb="toast"] div {
+        color: #ffffff !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -167,12 +189,13 @@ def login():
     
     with col2:
         st.markdown("<div style='height: 15vh;'></div>", unsafe_allow_html=True)
+        # 텍스트에 inline style로 강제 색상 지정 (CSS override가 안 먹힐 경우 대비)
         st.markdown(
             """
             <div style="text-align: center;">
                 <div class="login-logo">🩺</div>
-                <h1 style="font-weight: 800; margin-bottom: 0;">Med-Study OS</h1>
-                <p style="color: #8e8e93; margin-bottom: 30px;">당신의 스마트한 의대 학습 파트너</p>
+                <h1 style="font-weight: 800; margin-bottom: 0; color: #1c1c1e;">Med-Study OS</h1>
+                <p class="login-desc" style="color: #8e8e93; margin-bottom: 30px;">당신의 스마트한 의대 학습 파트너</p>
             </div>
             """, 
             unsafe_allow_html=True
@@ -487,7 +510,7 @@ with tab1:
                             if not is_editing:
                                 st.markdown("---")
                                 st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
-                                st.markdown(f"<span class='text-sm'>🕒 최근 업데이트: {subj_data['last_updated']}</span>", unsafe_allow_html=True)
+                                st.markdown(f"<span class='gray-text'>🕒 최근 업데이트: {subj_data['last_updated']}</span>", unsafe_allow_html=True)
 
 
 # --- TAB 2: 강의 분석 ---
