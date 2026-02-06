@@ -1,4 +1,4 @@
-# app.py (UI: Photo-Like Card Style / Logic: Full Features Restored)
+# app.py (UI: Premium Photo-Like Card / Logic: Full Features + Smart AI)
 import time
 import re
 import random
@@ -15,72 +15,103 @@ from google.api_core import retry, exceptions
 # ==========================================
 st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
 
-# Custom CSS for UI Enhancement
+# Custom CSS for Premium UI
 st.markdown("""
 <style>
-    /* 1. Global Settings */
-    .stApp { background-color: #f8f9fa; } 
-    h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown { color: #1c1c1e !important; }
+    /* 1. App Background & Text */
+    .stApp { background-color: #f8f9fa; }
+    h1, h2, h3, h4, h5, h6, span, div, label, .stMarkdown { 
+        color: #2c3e50 !important; 
+        font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+    }
     
-    /* 2. Custom Badge Styles */
-    .badge-base {
-        padding: 4px 8px;
-        border-radius: 6px;
+    /* 2. Premium Card Style (Photo-like) */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        background-color: #ffffff;
+        border: 1px solid #eef2f6;
+        border-radius: 20px;
+        padding: 24px;
+        box-shadow: 0 4px 20px rgba(200, 210, 230, 0.25);
+        transition: all 0.2s ease-in-out;
+        margin-bottom: 16px;
+    }
+    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 30px rgba(200, 210, 230, 0.4);
+        border-color: #dee2e6;
+    }
+
+    /* 3. Badge Styles (Pill shape) */
+    .badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 12px;
+        border-radius: 99px;
         font-size: 0.75rem;
         font-weight: 700;
         margin-right: 6px;
-        display: inline-block;
-        white-space: nowrap;
+        margin-bottom: 8px;
+        letter-spacing: -0.3px;
     }
-    .badge-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
-    .badge-red { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
-    .badge-gray { background-color: #f5f5f5; color: #616161; border: 1px solid #e0e0e0; }
-    .badge-green { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+    .badge-blue { background-color: #e3f2fd; color: #1976d2; border: 1px solid #bbdefb; }
+    .badge-red { background-color: #ffebee; color: #d32f2f; border: 1px solid #ffcdd2; }
+    .badge-gray { background-color: #f5f5f5; color: #616161; border: 1px solid #eeeeee; }
     
-    /* 3. Question Text Styles */
-    .q-title {
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: #212121 !important;
-        margin: 12px 0 8px 0;
-        line-height: 1.5;
+    /* 4. Question Typography */
+    .q-header {
+        font-size: 1.15rem;
+        font-weight: 800;
+        color: #1a1a1a !important;
+        margin-top: 8px;
+        margin-bottom: 12px;
+        line-height: 1.4;
     }
     .q-body {
-        font-size: 0.95rem;
-        color: #424242 !important;
-        background-color: #fafafa;
-        padding: 12px;
-        border-radius: 8px;
-        line-height: 1.6;
-        white-space: pre-wrap;
-        border: 1px solid #f0f0f0;
-    }
-    
-    /* 4. Dashed Divider */
-    .dashed-line {
-        border-top: 2px dashed #e0e0e0;
-        margin: 16px 0;
+        font-size: 0.98rem;
+        color: #495057 !important;
+        line-height: 1.7;
+        background-color: #f8f9fa; /* 아주 연한 회색 배경 */
+        padding: 16px;
+        border-radius: 12px;
+        margin-bottom: 16px;
     }
 
-    /* 5. Sidebar & Buttons */
-    div.stButton > button { border-radius: 10px; font-weight: 600; border: none; box-shadow: none; background-color: #f1f3f5; height: 2.8rem; }
-    div.stButton > button:hover { background-color: #e9ecef; transform: scale(0.99); }
-    div.stButton > button[kind="primary"] { background-color: #007aff; color: white; }
-    div.stButton > button[kind="primary"] p { color: #ffffff !important; }
-    
-    /* 6. Layout Utils */
-    .block-container { padding-top: 1.5rem !important; }
-    header[data-testid="stHeader"] { display: none; }
-    
-    /* 7. Expander Styling Override */
+    /* 5. Dashed Line Separator */
+    .dashed-line {
+        border-top: 2px dashed #e0e0e0;
+        margin: 20px 0;
+        width: 100%;
+        height: 0;
+    }
+
+    /* 6. Button & Expander Styling */
     .streamlit-expanderHeader {
         font-size: 0.9rem;
         font-weight: 600;
         color: #555;
         background-color: #fff;
-        border: 1px solid #eee;
-        border-radius: 8px;
+        border: 1px solid #e9ecef;
+        border-radius: 10px;
+        padding: 8px 12px;
     }
+    .streamlit-expanderHeader:hover {
+        background-color: #f8f9fa;
+        color: #007aff;
+        border-color: #007aff;
+    }
+    div[data-testid="stExpander"] {
+        border: none;
+        box-shadow: none;
+    }
+    
+    /* 7. Primary Buttons */
+    div.stButton > button { border-radius: 12px; font-weight: 600; border: none; height: 3rem; transition: 0.2s; }
+    div.stButton > button[kind="primary"] { background: linear-gradient(135deg, #007aff 0%, #0062cc 100%); box-shadow: 0 4px 12px rgba(0,122,255,0.3); }
+    div.stButton > button[kind="primary"]:hover { box-shadow: 0 6px 16px rgba(0,122,255,0.4); transform: scale(1.01); }
+    
+    /* Layout */
+    .block-container { padding-top: 2rem; max-width: 1200px; }
+    header { visibility: hidden; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -95,7 +126,7 @@ defaults = {
     "edit_target_subject": None, "subject_detail_view": None, "t2_selected_subject": None,
     "transcribed_text": "", "chat_history": [],
     "last_page_sig": None, "last_ai_sig": None, "last_ai_text": "", "last_related": [],
-    "tr_res": None # [Restored] Transcript Result Cache
+    "tr_res": None 
 }
 
 for k, v in defaults.items():
@@ -112,9 +143,9 @@ def login():
         st.markdown(
             """
             <div style="text-align: center;">
-                <div style="font-size: 5rem; margin-bottom: 10px;">🩺</div>
+                <div style="font-size: 4rem; margin-bottom: 10px;">🩺</div>
                 <h1 style="font-weight: 800; margin-bottom: 0; color: #1c1c1e;">Med-Study OS</h1>
-                <p style="color: #8e8e93; margin-bottom: 30px;">스마트한 의대 족보 분석기</p>
+                <p style="color: #8e8e93; font-size: 1.1rem;">의대생을 위한 스마트 족보 분석기</p>
             </div>
             """, 
             unsafe_allow_html=True
@@ -267,18 +298,14 @@ def transcribe_audio_gemini(audio_bytes, api_key):
 
 # [Metadata Parser]
 def parse_metadata_from_filename(filename):
-    """파일명에서 연도, 학기, 시험 종류 추출"""
     year = ""
     exam_type = ""
-    
     year_match = re.search(r'(20\d{2})', filename)
     if year_match: year = year_match.group(1)
-    
     if "중간" in filename: exam_type = "중간"
     elif "기말" in filename: exam_type = "기말"
     elif "모의" in filename: exam_type = "모의"
     elif "국시" in filename: exam_type = "국시"
-    
     full_meta = f"{year} {exam_type}".strip()
     return full_meta if full_meta else "기출"
 
@@ -298,9 +325,9 @@ def build_page_analysis_prompt(lecture_text, related_jokbo, subject):
     [강의 내용]
     {lecture_text[:1500]}
     
-    다음 3가지를 명확히 구분하여 출력하라.
+    다음 3가지를 명확히 구분하여 출력하라. 내용을 충실하게 작성할 것.
     [SECTION: DIRECTION] 이 페이지에서 시험에 나올만한 핵심 포인트 (1~2문장)
-    [SECTION: TWIN_Q] 족보와 유사한 변형 문제 (객관식) 하나 만들기
+    [SECTION: TWIN_Q] 족보와 유사한 변형 문제 (객관식) 하나 만들기 (문제와 보기 포함)
     [SECTION: EXPLANATION] 위 변형 문제의 정답 및 상세 해설
     """
 
@@ -308,26 +335,18 @@ def build_chat_prompt(history, context_text, related_jokbo, question):
     jokbo_ctx = "\n".join([f"- {r['content']['text'][:300]}" for r in related_jokbo[:3]])
     return f"질문: {question}\n강의내용: {context_text[:1000]}\n족보: {jokbo_ctx}\n답변해주세요."
 
-# [Restored] Transcript Prompt
 def build_transcript_prompt(chunks, related_packs, subject):
     packed = ""
     for idx, (chunk, rel) in enumerate(zip(chunks, related_packs), 1):
         if not has_jokbo_evidence(rel): continue
         ctx = "\n".join([f"- {r['content']['text'][:200]}" for r in rel[:2]])
         packed += f"\n(구간 {idx})\n[강의] {chunk}\n[족보근거] {ctx}\n"
-    
     if not packed: return "족보와 관련된 특별한 내용은 발견되지 않았습니다. 일반적인 요약입니다."
-    
     return f"""
     당신은 의대 조교입니다. 강의 전사 내용을 족보 기반으로 분석하여 요약하세요.
     과목: {subject}
-    
     {packed}
-    
-    출력 형식:
-    [족보 적중 노트]
-    1. 핵심 주제 (관련 족보 연계)
-    2. 교수님이 강조한 내용
+    출력 형식: [족보 적중 노트] 1. 핵심 주제... 2. 교수님 강조...
     """
 
 def chunk_transcript(text: str, max_chars: int = 900):
@@ -360,7 +379,7 @@ def get_subject_stats():
     stats = {}
     for item in st.session_state.db:
         subj = item.get("subject", "기타")
-        if subj not in stats: stats[subj] = {"count": 0, "last_updated": "방금 전"}
+        if subj not in stats: stats[subj] = {"count": 0}
         stats[subj]["count"] += 1
     return stats
 
@@ -389,7 +408,7 @@ with st.sidebar:
     my_subjects = sorted({x.get("subject", "기타") for x in st.session_state.db})
     if my_subjects:
         for s in my_subjects:
-            st.markdown(f"<div class='sidebar-subject'>📘 {s}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='background:white; padding:10px; border-radius:10px; border:1px solid #eee; margin-bottom:5px;'>📘 {s}</div>", unsafe_allow_html=True)
     else:
         st.caption("등록된 과목이 없습니다.")
     st.divider()
@@ -441,10 +460,11 @@ with tab1:
         file_map = get_subject_files(target_subj)
         for fname, count in file_map.items():
             meta = parse_metadata_from_filename(fname)
+            # Use container with border for card look
             with st.container(border=True):
                 c1, c2 = st.columns([5, 1])
                 c1.markdown(f"**📄 {fname}**")
-                c1.markdown(f"<span class='badge-base badge-blue'>{meta}</span>", unsafe_allow_html=True)
+                c1.markdown(f"<span class='badge badge-blue'>{meta}</span>", unsafe_allow_html=True)
                 c2.caption(f"{count} pages")
     else:
         col_upload, col_list = st.columns([1, 2])
@@ -479,7 +499,6 @@ with tab1:
                                     
                                     for p_idx, page in enumerate(doc):
                                         text = page.get_text().strip()
-                                        # OCR Fallback
                                         if len(text) < 50:
                                             try:
                                                 pix = page.get_pixmap()
@@ -594,6 +613,7 @@ with tab2:
                         rel = st.session_state.last_related
                         
                         if has_jokbo_evidence(rel):
+                            # AI Analysis
                             if st.session_state.api_key_ok:
                                 aisig = (psig, target_subj)
                                 if aisig != st.session_state.last_ai_sig:
@@ -610,7 +630,6 @@ with tab2:
                                         st.session_state.last_ai_sig = aisig
                             
                             res_ai = st.session_state.last_ai_text
-                            
                             high_rel_count = len([r for r in rel if r['score'] > 0.82])
                             
                             for i, r in enumerate(rel[:2]):
@@ -619,18 +638,26 @@ with tab2:
                                 txt = r['content'].get('text', '')[:250]
                                 meta = parse_metadata_from_filename(src)
                                 
+                                # Frequency Badge
                                 freq_html = ""
                                 if i == 0 and high_rel_count >= 2:
-                                    freq_html = f"<span class='badge-base badge-red'>★ 중요 ({high_rel_count}회 출제)</span>"
+                                    freq_html = f"<span class='badge badge-red'>🔥 {high_rel_count}회 출제</span>"
                                 elif score > 0.88:
-                                    freq_html = "<span class='badge-base badge-red'>★ 매우 유사</span>"
+                                    freq_html = "<span class='badge badge-red'>★ 매우 유사</span>"
                                 
+                                # --- RENDER CARD ---
                                 with st.container(border=True):
-                                    st.markdown(f"<div><span class='badge-base badge-blue'>기출</span>{freq_html}<span class='badge-base badge-gray'>{meta}</span></div>", unsafe_allow_html=True)
-                                    st.markdown(f"<div class='q-title'>Q. 다음 중... (자동요약)</div>", unsafe_allow_html=True)
+                                    # Header: Badges
+                                    st.markdown(f"<div><span class='badge badge-blue'>기출</span>{freq_html}<span class='badge badge-gray'>{meta}</span></div>", unsafe_allow_html=True)
+                                    
+                                    # Content
+                                    st.markdown(f"<div class='q-header'>Q. 다음 중... (자동요약)</div>", unsafe_allow_html=True)
                                     st.markdown(f"<div class='q-body'>{txt}...</div>", unsafe_allow_html=True)
+                                    
+                                    # Divider
                                     st.markdown("<div class='dashed-line'></div>", unsafe_allow_html=True)
                                     
+                                    # Action Buttons (Expanders)
                                     c1, c2, c3 = st.columns(3)
                                     with c1:
                                         with st.expander("📝 정답/해설"):
@@ -661,7 +688,7 @@ with tab2:
                                     st.markdown(ans)
                                     st.session_state.chat_history.append({"role":"assistant", "content":ans})
 
-# --- TAB 3: 강의 녹음/분석 (Restored) ---
+# --- TAB 3: 강의 녹음/분석 (Full Features) ---
 with tab3:
     with st.container(border=True):
         st.markdown("#### 🎙️ 강의 녹음/분석")
