@@ -293,7 +293,7 @@ def get_embedding_with_retry(text, model="models/text-embedding-004"):
 def get_embedding(text: str):
     text = (text or "").strip()
     if not text: return []
-    text = text[:9000] 
+    text = text[:12000] 
     ensure_configured()
     try:
         return get_embedding_with_retry(text, "models/text-embedding-004")
@@ -539,22 +539,27 @@ with tab1:
                     if not st.session_state.api_key_ok: st.error("API Key 설정이 필요합니다.")
                     elif not files: st.warning("파일을 선택해주세요.")
                     else:
+                        # ---------------------------------------------------------
+                        # [STABILITY FIX] 상세 진행 상태 및 속도 제한 적용 (멈춤 방지)
+                        # ---------------------------------------------------------
                         prog_bar = st.progress(0)
-                        status_text = st.empty()
+                        status_text = st.empty() # 실시간 상태 표시용
                         new_db = []
                         total_files = len(files)
                         
                         for i, f in enumerate(files):
-                            status_text.text(f"처리 중: {f.name}...")
-                            
                             try:
+                                status_text.text(f"📂 파일 분석 중: {f.name}...")
                                 pgs = extract_text_from_pdf(f)
-                                total_pages = len(pgs)
                                 
-                                # 페이지별 임베딩 처리
+                                if not pgs:
+                                    st.toast(f"⚠️ {f.name}: 텍스트 없음", icon="⚠️")
+                                    continue
+                                
+                                total_pages = len(pgs)
                                 for p_idx, p in enumerate(pgs):
-                                    # 상세 진행 상황 표시 (사용자 안심용)
-                                    status_text.text(f"⏳ {f.name} 처리 중... ({p_idx + 1}/{total_pages} 페이지)")
+                                    # 상세 진행 상황 업데이트 (사용자가 멈춤으로 오해하지 않도록)
+                                    status_text.text(f"⏳ {f.name} 처리 중... ({p_idx + 1}/{total_pages} 페이지) AI 분석 중...")
                                     
                                     try:
                                         emb = get_embedding(p["text"])
@@ -562,23 +567,27 @@ with tab1:
                                             p["embedding"] = emb
                                             p["subject"] = final_subj
                                             new_db.append(p)
-                                    except Exception:
-                                        # 개별 페이지 에러 무시
-                                        pass
+                                    except Exception as e_page:
+                                        print(f"Error on page {p_idx+1}: {e_page}")
+                                        # 개별 페이지 에러 시 무시하고 진행
                                     
-                                    # [중요] API 속도 제한 방지 딜레이
+                                    # [CRITICAL] API Rate Limit 방지를 위한 지연 (1초)
                                     time.sleep(1.0)
-                                    
-                            except Exception as e:
-                                st.error(f"{f.name} 처리 중 오류: {e}")
                                 
-                            prog_bar.progress((i + 1) / total_files)
+                            except Exception as e:
+                                st.error(f"❌ {f.name} 처리 중 오류: {str(e)}")
                             
-                        st.session_state.db.extend(new_db)
-                        status_text.text("학습 완료!")
-                        st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
-                        time.sleep(1)
-                        st.rerun()
+                            prog_bar.progress((i + 1) / total_files)
+                        
+                        if new_db:
+                            st.session_state.db.extend(new_db)
+                            status_text.success(f"✅ 학습 완료! 총 {len(new_db)} 페이지 저장됨.")
+                            st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
+                            time.sleep(1.5)
+                            st.rerun()
+                        else:
+                            status_text.warning("저장된 데이터가 없습니다.")
+                        # ---------------------------------------------------------
                         
         with col_list:
             st.markdown("#### 📚 내 학습 데이터")
