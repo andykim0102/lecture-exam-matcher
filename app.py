@@ -809,10 +809,12 @@ with tab2:
                                         st.session_state.last_ai_sig = aisig
                                 st.markdown(st.session_state.last_ai_text)
                             else:
+                                # [FIX] 족보 발견 여부와 상관없이 '학습 가이드'는 항상 표시하도록 구조 변경
+                                
+                                # 1. 족보 문항 섹션
                                 if has_jokbo_evidence(rel):
                                     st.markdown("##### 🔥 관련 족보 문항 (발견됨!)")
                                     
-                                    # [HERE IS THE INTEGRATED FIX]
                                     for idx, r in enumerate(rel[:2]):
                                         score = r['score']
                                         src = r['content'].get('source', 'Unknown')
@@ -826,15 +828,14 @@ with tab2:
                                         </div>
                                         """, unsafe_allow_html=True)
                                         
-                                        # [FIX] 쌍둥이 문제 생성 (파싱 로직 추가됨)
+                                        # [FIX] 쌍둥이 문제 생성 (UI/UX 개선 및 안정화)
                                         with st.expander(f"✨ 쌍둥이 문제 만들기 (#{idx+1})"):
-                                            # Session state key for this item's parse result
                                             parse_key = f"parsed_{hash(raw_q_text)}"
                                             
                                             if parse_key not in st.session_state:
                                                 st.session_state[parse_key] = None
                                             
-                                            # 1. Parsing Step
+                                            # Parsing Step
                                             if st.session_state[parse_key] is None:
                                                 if st.button("1단계: 문제 구조화 (파싱)", key=f"btn_parse_{idx}"):
                                                     with st.spinner("텍스트 구조 분석 중..."):
@@ -849,48 +850,50 @@ with tab2:
                                                     st.error("구조화 실패. 텍스트가 너무 손상되었습니다.")
                                                 else:
                                                     st.success("✅ 자동 파싱 성공!")
-                                                    # JSON 대신 가독성 좋은 마크다운 표시
+                                                    
+                                                    # [UI FIX] 명확한 Markdown 표시
                                                     q_text = parsed_res.get("question", "")
                                                     a_text = parsed_res.get("answer", "")
-                                                    
                                                     st.markdown(f"**질문:** {q_text}")
                                                     st.markdown(f"**정답:** {a_text}")
                                                     
                                                     st.divider()
                                                     
-                                                    # 2. Generation Step
+                                                    # Generation Step
                                                     if st.button("✨ 변형 문제 생성하기", key=f"btn_gen_{idx}", type="primary"):
                                                         with st.spinner("쌍둥이 문제 생성 중..."):
                                                             twin_q = generate_twin_problem_from_parsed(parsed_res)
                                                             st.markdown("---")
                                                             st.markdown(twin_q)
-                                                            
-                                    # 기존의 전체 요약 분석 (DIRECTION 등)
-                                    aisig = (psig, target_subj)
-                                    if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
-                                        with st.spinner("종합 분석 중..."):
-                                            prmt = build_page_analysis_prompt(p_text, rel, target_subj)
-                                            raw_res, _ = generate_with_fallback(prmt, st.session_state.text_models)
-                                            
-                                            # Simple parsing for the summary section
-                                            parts = raw_res.split("[SECTION:")
-                                            parsed_sum = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
-                                            for p in parts:
-                                                if "DIRECTION]" in p: parsed_sum["DIRECTION"] = p.replace("DIRECTION]", "").strip()
-                                                elif "TWIN_Q]" in p: parsed_sum["TWIN_Q"] = p.replace("TWIN_Q]", "").strip()
-                                                elif "EXPLANATION]" in p: parsed_sum["EXPLANATION"] = p.replace("EXPLANATION]", "").strip()
-                                            
-                                            st.session_state.last_ai_text = parsed_sum
-                                            st.session_state.last_ai_sig = aisig
-                                    
-                                    res_dict = st.session_state.last_ai_text
-                                    if isinstance(res_dict, dict):
-                                        st.markdown("---")
-                                        st.markdown("##### 🧭 페이지 학습 가이드")
-                                        st.info(res_dict.get("DIRECTION", ""))
                                 else:
-                                    st.info("💡 이 페이지와 직접 연관된 족보 내용은 없습니다.")
-                                    st.caption("가볍게 훑고 넘어가셔도 좋습니다.")
+                                    st.info("💡 이 페이지와 직접 연관된(0.7 이상) 족보 내용은 없습니다.")
+                                    
+                                # 2. 페이지 학습 가이드 섹션 (항상 표시)
+                                st.markdown("---")
+                                st.markdown("##### 🧭 페이지 학습 가이드")
+                                
+                                aisig = (psig, target_subj)
+                                if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
+                                    with st.spinner("종합 분석 중..."):
+                                        prmt = build_page_analysis_prompt(p_text, rel, target_subj)
+                                        raw_res, _ = generate_with_fallback(prmt, st.session_state.text_models)
+                                        
+                                        parts = raw_res.split("[SECTION:")
+                                        parsed_sum = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
+                                        for p in parts:
+                                            if "DIRECTION]" in p: parsed_sum["DIRECTION"] = p.replace("DIRECTION]", "").strip()
+                                            elif "TWIN_Q]" in p: parsed_sum["TWIN_Q"] = p.replace("TWIN_Q]", "").strip()
+                                            elif "EXPLANATION]" in p: parsed_sum["EXPLANATION"] = p.replace("EXPLANATION]", "").strip()
+                                        
+                                        st.session_state.last_ai_text = parsed_sum
+                                        st.session_state.last_ai_sig = aisig
+                                
+                                res_dict = st.session_state.last_ai_text
+                                if isinstance(res_dict, dict):
+                                    st.info(res_dict.get("DIRECTION", "분석 내용을 불러오지 못했습니다."))
+                                else:
+                                    st.caption("분석 대기 중...")
+                                    
                         else:
                             st.info("분석할 텍스트가 없습니다.")
 
