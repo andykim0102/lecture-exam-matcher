@@ -1,4 +1,4 @@
-# app.py (UI: Yellow Box / Logic: Robust + API Diagnostics)
+# app.py (UI: Yellow Box / Logic: Multi-Model Fallback & Robust)
 import time
 import re
 import random
@@ -120,18 +120,6 @@ st.markdown("""
         gap: 8px;
     }
     .sidebar-icon { font-size: 1.1rem; }
-    
-    /* 12. Processing Log */
-    .proc-log {
-        font-family: monospace;
-        font-size: 0.8rem;
-        color: #555;
-        background: #f1f1f1;
-        padding: 10px;
-        border-radius: 8px;
-        max-height: 150px;
-        overflow-y: auto;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -297,39 +285,58 @@ def extract_text_from_pdf(uploaded_file):
     except:
         return []
 
-# --- Robust Embedding Helper ---
+# --- Robust Embedding Helper (The "Different Angle" Solution) ---
 def get_embedding_robust(text: str, status_placeholder=None):
     """
-    속도 제한(429)을 고려한 견고한 임베딩 함수.
+    속도 제한(429) 및 모델 오류를 고려한 견고한 임베딩 함수.
+    Multi-Model Fallback 전략 사용.
     """
     text = (text or "").strip()
-    # 1. 텍스트가 너무 짧으면(50자 미만) API 호출 스킵 (이미지 페이지 등)
+    # 텍스트가 너무 짧으면 의미 없으므로 API 호출 절약
     if len(text) < 50: 
-        return None
+        return None, "text_too_short"
         
     text = text[:10000] # 길이 제한 안전장치
     ensure_configured()
     
     max_retries = 3
-    base_wait = 2 # 기본 2초 대기
+    base_wait = 2
     
-    for attempt in range(max_retries):
-        try:
-            # 2. 무료 사용량 제한 고려하여 강제 지연
-            time.sleep(1.5) 
+    # 시도할 모델 목록: 최신 모델이 안 되면 구형 모델로 자동 전환 (Fallback)
+    candidate_models = ["models/text-embedding-004", "models/embedding-001"]
+    
+    for model_name in candidate_models:
+        for attempt in range(max_retries):
+            try:
+                # 무료 API 속도 제한 고려하여 강제 지연 (특히 중요)
+                time.sleep(1.5) 
+                
+                if "004" in model_name:
+                    # 최신 모델용 파라미터
+                    res = genai.embed_content(model=model_name, content=text, task_type="retrieval_document")
+                else:
+                    # 구형 모델용 파라미터 (task_type 지원 안 할 수 있음)
+                    res = genai.embed_content(model=model_name, content=text)
+                    
+                if res and "embedding" in res:
+                    return res["embedding"], None # 성공
             
-            return genai.embed_content(model="models/text-embedding-004", content=text, task_type="retrieval_document")["embedding"]
-        except Exception as e:
-            err_msg = str(e)
-            if "429" in err_msg or "Resource exhausted" in err_msg:
-                wait_time = base_wait * (2 ** attempt)
-                if status_placeholder:
-                    status_placeholder.caption(f"⚠️ 사용량 제한. {wait_time}초 대기 후 재시도 ({attempt+1}/{max_retries})")
-                time.sleep(wait_time)
-            else:
-                # 다른 에러는 무시하고 None 반환 (진행 계속)
-                return None
-    return None
+            except Exception as e:
+                err_msg = str(e)
+                # Rate Limit 에러인 경우: 대기 후 같은 모델 재시도
+                if "429" in err_msg or "Resource exhausted" in err_msg:
+                    wait_time = base_wait * (2 ** attempt)
+                    if status_placeholder:
+                        status_placeholder.caption(f"⚠️ {model_name}: 사용량 많음. {wait_time}초 대기... ({attempt+1}/{max_retries})")
+                    time.sleep(wait_time)
+                # 모델을 찾을 수 없거나(404) 권한 문제 등 치명적 에러: 즉시 다음 모델로 넘어감
+                elif "404" in err_msg or "Not Found" in err_msg or "Permission" in err_msg:
+                    break 
+                else:
+                    # 기타 에러는 잠시 대기 후 재시도
+                    time.sleep(1)
+                    
+    return None, "api_error"
 
 def filter_db_by_subject(subject: str, db: list[dict]):
     if not db: return []
@@ -338,8 +345,8 @@ def filter_db_by_subject(subject: str, db: list[dict]):
 
 def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
     if not db: return []
-    # 쿼리 임베딩도 robust 하게
-    query_emb = get_embedding_robust(query_text)
+    # 쿼리 임베딩도 Robust하게 처리 (tuple 반환 처리)
+    query_emb, _ = get_embedding_robust(query_text)
     if not query_emb: return []
     
     valid_items = [item for item in db if item.get("embedding")]
@@ -593,18 +600,18 @@ with tab1:
                     elif not files: st.warning("파일을 선택해주세요.")
                     else:
                         # ---------------------------------------------------------
-                        # [SMART ROBUST LOGIC] 투명한 처리 로그 & 스마트 스킵
+                        # [SMART ROBUST LOGIC] 투명한 처리 로그 & 스마트 스킵 & 모델 전환
                         # ---------------------------------------------------------
                         prog_bar = st.progress(0)
                         
-                        # 1. 상태 로그창 생성 (Expander로 처리 내용 실시간 확인 가능)
+                        # 상태 로그창 생성
                         with st.expander("📝 처리 로그 보기 (클릭하여 펼치기)", expanded=True):
                             log_container = st.empty()
                             logs = []
                             
                             def log(msg):
                                 logs.append(msg)
-                                log_container.markdown("\n".join([f"- {l}" for l in logs[-5:]])) # 최근 5줄만 표시
+                                log_container.markdown("\n".join([f"- {l}" for l in logs[-5:]]))
 
                             new_db = []
                             total_files = len(files)
@@ -615,7 +622,7 @@ with tab1:
                                     pgs = extract_text_from_pdf(f)
                                     
                                     if not pgs:
-                                        log(f"⚠️ {f.name}: 텍스트를 추출할 수 없습니다. (스캔본?)")
+                                        log(f"⚠️ {f.name}: 텍스트 없음 (이미지 스캔본?)")
                                         continue
                                     
                                     total_pages = len(pgs)
@@ -623,24 +630,23 @@ with tab1:
                                     skip_cnt = 0
                                     
                                     for p_idx, p in enumerate(pgs):
-                                        # 로그 업데이트
+                                        # 진행 상황 로그 업데이트
                                         log_container.markdown(f"⏳ **{f.name}** 처리 중... ({p_idx + 1}/{total_pages} 페이지)")
                                         
-                                        # 텍스트 길이 체크 (너무 짧으면 스킵)
-                                        if len(p['text']) < 50:
-                                            skip_cnt += 1
-                                            continue
-
-                                        # Robust Embedding 호출 (자동 재시도 포함)
-                                        emb = get_embedding_robust(p["text"], status_placeholder=st.empty())
+                                        # Robust Embedding 호출 (자동 모델 전환 및 재시도 포함)
+                                        # status_placeholder를 넘겨주어 모델 전환 메시지를 보여줌
+                                        emb, err_code = get_embedding_robust(p["text"], status_placeholder=st.empty())
                                         
                                         if emb:
                                             p["embedding"] = emb
                                             p["subject"] = final_subj
                                             new_db.append(p)
                                             success_cnt += 1
+                                        elif err_code == "text_too_short":
+                                            skip_cnt += 1
+                                            # log(f"ℹ️ P.{p_idx+1} 내용 부족 (건너뜀)") # 너무 시끄러우니 생략
                                         else:
-                                            log(f"❌ P.{p_idx+1} 임베딩 실패 (건너뜀)")
+                                            log(f"❌ P.{p_idx+1} 임베딩 실패 (API/네트워크 오류)")
                                     
                                     log(f"✅ **{f.name}** 완료: 성공 {success_cnt}, 스킵 {skip_cnt}")
                                     
