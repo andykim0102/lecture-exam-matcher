@@ -133,7 +133,7 @@ defaults = {
     "lecture_doc": None, "lecture_filename": None, "current_page": 0,
     "edit_target_subject": None, "subject_detail_view": None, "t2_selected_subject": None,
     "transcribed_text": "", "chat_history": [],
-    "last_page_sig": None, "last_ai_sig": None, "last_ai_text": "", "last_related": []
+    "last_page_sig": None, "last_ai_sig": None, "last_ai_text": None, "last_related": []
 }
 
 for k, v in defaults.items():
@@ -809,11 +809,11 @@ with tab2:
                                         st.session_state.last_ai_sig = aisig
                                 st.markdown(st.session_state.last_ai_text)
                             else:
-                                # [FIX] 족보 발견 여부와 상관없이 '학습 가이드'는 항상 표시하도록 구조 변경
+                                # [FIX] 족보 매칭 여부와 상관없이 학습 가이드와 관련 문항을 독립적으로 표시
                                 
-                                # 1. 족보 문항 섹션
+                                # 1. 족보 문항 섹션 (관련성 있는 경우만 표시)
                                 if has_jokbo_evidence(rel):
-                                    st.markdown("##### 🔥 관련 족보 문항 (발견됨!)")
+                                    st.markdown("##### 🔥 관련 족보 문항")
                                     
                                     for idx, r in enumerate(rel[:2]):
                                         score = r['score']
@@ -851,7 +851,7 @@ with tab2:
                                                 else:
                                                     st.success("✅ 자동 파싱 성공!")
                                                     
-                                                    # [UI FIX] 명확한 Markdown 표시
+                                                    # [UI FIX] 명확한 Markdown 표시 (JSON 대신)
                                                     q_text = parsed_res.get("question", "")
                                                     a_text = parsed_res.get("answer", "")
                                                     st.markdown(f"**질문:** {q_text}")
@@ -867,17 +867,18 @@ with tab2:
                                                             st.markdown(twin_q)
                                 else:
                                     st.info("💡 이 페이지와 직접 연관된(0.7 이상) 족보 내용은 없습니다.")
-                                    
-                                # 2. 페이지 학습 가이드 섹션 (항상 표시)
-                                st.markdown("---")
+                                
+                                # 2. 페이지 학습 가이드 섹션 (항상 표시되도록 밖으로 이동)
+                                st.divider()
                                 st.markdown("##### 🧭 페이지 학습 가이드")
                                 
                                 aisig = (psig, target_subj)
                                 if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
-                                    with st.spinner("종합 분석 중..."):
+                                    with st.spinner("페이지 내용을 심층 분석 중..."):
                                         prmt = build_page_analysis_prompt(p_text, rel, target_subj)
                                         raw_res, _ = generate_with_fallback(prmt, st.session_state.text_models)
                                         
+                                        # Simple parsing for the summary section
                                         parts = raw_res.split("[SECTION:")
                                         parsed_sum = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
                                         for p in parts:
