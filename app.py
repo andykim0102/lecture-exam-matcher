@@ -1,8 +1,9 @@
-# app.py (Optimized + Handwriting)
-# app.py (Optimized - No Canvas)
+# app.py (Optimized)
 import time
 import re
 import random
+import uuid
+import json
 import numpy as np
 import fitz  # PyMuPDF
 from PIL import Image
@@ -42,10 +43,8 @@ st.markdown("""
    .block-container { 
        padding-top: 1rem !important; 
        padding-bottom: 2rem !important; 
-        padding-left: 1rem !important;
-        padding-right: 1rem !important;
-        padding-left: 1rem !important; 
-        padding-right: 1rem !important; 
+       padding-left: 1rem !important;
+       padding-right: 1rem !important;
        max-width: 100% !important;
    }
    header[data-testid="stHeader"] { display: none; }
@@ -96,7 +95,8 @@ st.markdown("""
    .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
    div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
    
-   /* 10. Jokbo Items */
+    /* 10. Jokbo Items & Highlights */
+    /* 10. Jokbo Items */
    .jokbo-item {
        background-color: #fffde7;
        border: 1px solid #fff59d;
@@ -104,6 +104,7 @@ st.markdown("""
        padding: 16px;
        margin-bottom: 12px;
        box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+        transition: all 0.3s ease;
    }
    .jokbo-source {
        font-size: 0.8rem;
@@ -113,6 +114,13 @@ st.markdown("""
        text-transform: uppercase;
        letter-spacing: 0.5px;
    }
+    /* Highlight effect for linked items */
+    .highlight-box {
+        border: 2px solid #ff3b30 !important;
+        background-color: #fff0f0 !important;
+        transform: scale(1.02);
+        box-shadow: 0 4px 12px rgba(255, 59, 48, 0.2);
+    }
    
    /* 11. Sidebar Items */
    .sidebar-subject {
@@ -129,17 +137,6 @@ st.markdown("""
        gap: 8px;
    }
    .sidebar-icon { font-size: 1.1rem; }
-    
-    /* 12. Canvas Toolbar */
-    .canvas-toolbar {
-        display: flex;
-        gap: 10px;
-        margin-bottom: 10px;
-        padding: 10px;
-        background: #f1f3f5;
-        border-radius: 10px;
-        align-items: center;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -202,9 +199,18 @@ st.session_state.last_ai_text = ""
 if "last_related" not in st.session_state:
 st.session_state.last_related = []
 
-# --- Handwriting State ---
-if "drawings" not in st.session_state:
-    st.session_state.drawings = {}  # {(filename, page_idx): json_data}
+# --- New State for Canvas/Pinning Interaction ---
+if "postits" not in st.session_state:
+    st.session_state.postits = {}  # { (filename, page): [ {id, type, left, top, content_id, text, ...} ] }
+
+if "pin_payload" not in st.session_state:
+    st.session_state.pin_payload = None  # { content_id, text, source_type }
+
+if "focused_content_id" not in st.session_state:
+    st.session_state.focused_content_id = None # Right panel highlight
+
+if "focused_postit_id" not in st.session_state:
+    st.session_state.focused_postit_id = None # Left panel highlight
 
 
 # ==========================================
@@ -263,6 +269,7 @@ stats = {}
 for item in st.session_state.db:
 subj = item.get("subject", "기타")
 if subj not in stats:
+            # 실시간 업데이트 시뮬레이션 제거 (or keep random for demo feel)
 stats[subj] = {"count": 0, "last_updated": "방금 전"}
 stats[subj]["count"] += 1
 return stats
@@ -276,6 +283,7 @@ files[src] = files.get(src, 0) + 1
 return files
 
 def has_jokbo_evidence(related: list[dict]) -> bool:
+    # 유사도 임계값 조정 (0.72는 다소 높을 수 있으므로 상황에 맞게 조정)
 return bool(related) and related[0]["score"] >= 0.70
 
 def ensure_configured():
@@ -284,6 +292,7 @@ genai.configure(api_key=st.session_state["api_key"])
 
 @st.cache_data(show_spinner=False)
 def list_text_models(api_key: str):
+    """모델 목록 가져오기 (캐싱 적용)"""
 try:
 genai.configure(api_key=api_key)
 models = genai.list_models()
@@ -306,6 +315,7 @@ if text.strip():
 pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
 return pages
 
+# Retry decorator for API calls
 @retry.Retry(predicate=retry.if_exception_type(Exception)) 
 def get_embedding_with_retry(text, model="models/text-embedding-004"):
 return genai.embed_content(model=model, content=text, task_type="retrieval_document")["embedding"]
@@ -313,7 +323,8 @@ return genai.embed_content(model=model, content=text, task_type="retrieval_docum
 def get_embedding(text: str):
 text = (text or "").strip()
 if not text: return []
-text = text[:9000] 
+    text = text[:9000] 
+    text = text[:9000] # Safe limit for embedding models
 ensure_configured()
 try:
 return get_embedding_with_retry(text, "models/text-embedding-004")
@@ -321,6 +332,7 @@ except:
 try:
 return get_embedding_with_retry(text, "models/embedding-001")
 except Exception as e:
+            # st.error(f"Embedding failed: {e}") # Debug only
 return []
 
 def filter_db_by_subject(subject: str, db: list[dict]):
@@ -330,6 +342,7 @@ return [x for x in db if x.get("subject") == subject]
 
 def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
 if not db: return []
+    # Query embedding should ideally be cached if query is repeated, but text changes often here.
 query_emb = get_embedding(query_text)
 if not query_emb: return []
 valid_items = [item for item in db if item.get("embedding")]
@@ -346,6 +359,8 @@ def generate_with_fallback(prompt: str, model_names: list[str]):
 ensure_configured()
 candidates = model_names if model_names else ["gemini-1.5-flash", "gemini-pro"]
 last_err = None
+    
+    # Generation config to reduce randomness for factual tasks
 config = genai.GenerationConfig(temperature=0.3)
 
 for name in candidates:
@@ -372,6 +387,7 @@ st.error(f"음성 인식 실패: {e}")
 return None
 
 # --- Prompt Builders ---
+# --- Prompt Builders (Kept mostly same, added safety) ---
 
 def build_overview_prompt(first_page_text, subject):
 return f"""
@@ -575,6 +591,7 @@ if emb:
 p["embedding"] = emb
 p["subject"] = final_subj
 new_db.append(p)
+                                # 진행률 미세 업데이트 (선택 사항)
 
 prog_bar.progress((i + 1) / total_files)
 
@@ -623,8 +640,8 @@ st.markdown("---")
 st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
 st.markdown(f"<span class='gray-text'>🕒 {subj_data['last_updated']}</span>", unsafe_allow_html=True)
 
-# --- TAB 2: 강의 분석 (Handwriting Canvas) ---
-# --- TAB 2: 강의 분석 (No Canvas) ---
+# --- TAB 2: 강의 분석 (Interactive Canvas) ---
+# --- TAB 2: 강의 분석 ---
 with tab2:
 if st.session_state.t2_selected_subject is None:
 st.markdown("#### 📖 학습할 과목을 선택하세요")
@@ -657,79 +674,131 @@ st.session_state.lecture_filename = l_file.name
 st.session_state.current_page = 0
 st.session_state.last_page_sig = None
 st.session_state.chat_history = [] 
-                    st.session_state.drawings = {} # Clear drawings on new file
+                    st.session_state.postits = {} # Clear postits on new file
 
 if st.session_state.lecture_doc:
 doc = st.session_state.lecture_doc
-
+            
+            # --- Pinning Logic (Replacement for Drag and Drop) ---
+            if st.session_state.pin_payload:
+                st.info(f"📍 '{st.session_state.pin_payload['source_type']}' 부착 대기 중! 좌측 강의록의 원하는 위치를 클릭하세요.")
+            
 col_view, col_ai = st.columns([1.8, 1.2])
 
-            # --- Left: Viewer (Canvas with Handwriting) ---
-            # --- Left: Viewer (Standard Image) ---
+            # --- Left: Viewer (Canvas) ---
+            # Left: Viewer
 with col_view:
 with st.container(border=True):
-# Nav Toolbar
+                    # Nav Toolbar
 c1, c2, c3 = st.columns([1, 2, 1])
 with c1:
 if st.button("◀", use_container_width=True):
 if st.session_state.current_page > 0: 
 st.session_state.current_page -= 1
 st.session_state.chat_history = [] 
-st.rerun()
+                                st.rerun()
 with c2:
 st.markdown(f"<div style='text-align:center; font-weight:bold; padding-top:8px;'>Page {st.session_state.current_page+1} / {len(doc)}</div>", unsafe_allow_html=True)
 with c3:
 if st.button("▶", use_container_width=True):
 if st.session_state.current_page < len(doc)-1: 
 st.session_state.current_page += 1
-st.session_state.chat_history = []
-st.rerun()
+                                st.session_state.chat_history = []
+                                st.rerun()
+                                st.session_state.chat_history = [] 
 
                     # Prepare Image & Canvas
-                    # Prepare Image
+                    # Render Image
 page = doc.load_page(st.session_state.current_page)
 pix = page.get_pixmap(dpi=150)
 pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 p_text = page.get_text() or ""
+                    
+                    # Get existing postits for this page
+                    page_key = (st.session_state.lecture_filename, st.session_state.current_page)
+                    if page_key not in st.session_state.postits:
+                        st.session_state.postits[page_key] = {"objects": [], "version": "4.4.0"}
+                    
+                    # Highlight logic for canvas items (Make highlighted item red)
+                    canvas_objects = st.session_state.postits[page_key]["objects"]
+                    for obj in canvas_objects:
+                        if obj.get("content_id") == st.session_state.focused_postit_id:
+                            obj["stroke"] = "#FF0000"
+                            obj["strokeWidth"] = 4
+                        else:
+                            obj["stroke"] = "#000000" # default stroke
+                            obj["strokeWidth"] = 1
 
-                    # --- Handwriting Controls ---
-                    st.markdown("**✏️ 필기 도구**")
-                    t_c1, t_c2, t_c3 = st.columns([2, 2, 1])
-                    with t_c1:
-                        mode = st.radio("도구", ["펜 (그리기)", "선택/이동 (지우기)"], horizontal=True, label_visibility="collapsed")
-                        drawing_mode = "freedraw" if "펜" in mode else "transform"
-                    with t_c2:
-                        stroke_width = st.slider("굵기", 1, 20, 3, label_visibility="collapsed")
-                    with t_c3:
-                        stroke_color = st.color_picker("색상", "#FF0000", label_visibility="collapsed")
-
-                    # Load existing drawing
-                    page_key = f"{st.session_state.lecture_filename}_{st.session_state.current_page}"
-                    initial_drawing = st.session_state.drawings.get(page_key)
-
+                    # Render Canvas
                     if st_canvas:
+                        # Determine drawing mode based on whether we are pinning
+                        drawing_mode = "point" if st.session_state.pin_payload else "transform"
+                        
                         canvas_result = st_canvas(
-                            fill_color="rgba(255, 165, 0, 0.3)",
-                            stroke_width=stroke_width,
-                            stroke_color=stroke_color,
+                            fill_color="rgba(255, 255, 0, 0.3)",
+                            stroke_width=1,
+                            stroke_color="#000000",
                             background_image=pil_image,
                             update_streamlit=True,
                             height=pil_image.height,
                             width=pil_image.width,
                             drawing_mode=drawing_mode,
-                            initial_drawing=initial_drawing,
-                            key=f"canvas_{page_key}"
+                            initial_drawing=st.session_state.postits[page_key],
+                            key=f"canvas_{st.session_state.current_page}_{len(canvas_objects)}", # Force redraw on update
                         )
                         
-                        # Save state
+                        # Handle Canvas Events
+                        if canvas_result.json_data:
+                            # 1. New object created (Pin Dropped)
+                            if st.session_state.pin_payload and len(canvas_result.json_data["objects"]) > len(st.session_state.postits[page_key]["objects"]):
+                                new_obj = canvas_result.json_data["objects"][-1]
+                                # Convert Point to a "Note" Rectangle/Text representation
+                                note_obj = {
+                                    "type": "rect",
+                                    "left": new_obj["left"] - 15,
+                                    "top": new_obj["top"] - 15,
+                                    "width": 30,
+                                    "height": 30,
+                                    "fill": "rgba(255, 235, 59, 0.8)", # Yellow post-it
+                                    "stroke": "#fbc02d",
+                                    "strokeWidth": 2,
+                                    "content_id": st.session_state.pin_payload["content_id"],
+                                    "text": "📝" # Simple icon
+                                }
+                                # Add Text object on top (optional, simplifying to just rect for stability)
+                                st.session_state.postits[page_key]["objects"].append(note_obj)
+                                st.session_state.pin_payload = None # Clear payload
+                                st.rerun()
+
+                            # 2. Object Selected (Highlight Right Panel)
+                            selected = canvas_result.json_data.get("objects", [])
+                            # Find if any object is currently selected/active in the canvas (limited support in st_canvas json)
+                            # Workaround: Check if the returned JSON has modified properties or if using transform mode
+                            # In standard usage, clicking doesn't always send a 'selected' flag.
+                            # We'll use the hack: if list count matches but coordinates shifted or user interaction implies selection.
+                            # Actually, st_canvas doesn't robustly return 'selected' object ID. 
+                            # We will assume if user modifies an object, we focus it. 
+                            # For simple 'click to find', transform mode allows clicking.
+                            # Let's check selection by iterating objects if possible, or simplified:
+                            # Since we can't easily get 'clicked' ID without JS bridge, we rely on the user dragging/touching it in transform mode.
+                            pass
+
+                        # Since standard st_canvas doesn't return "clicked_object_id" easily,
+                        # We implement "Last Modified" or "Last Added" logic for pinning.
+                        # For finding right panel content: We need to trust the visual cue or add a custom component.
+                        # *Fallback*: Just use the pinning feature for now as requested.
+                        
+                        # Sync state
                         if canvas_result.json_data is not None:
-                             st.session_state.drawings[page_key] = canvas_result.json_data
-                    else:
-                        st.image(pil_image, use_container_width=True)
-                        st.warning("Canvas 라이브러리가 설치되지 않았습니다. `pip install streamlit-drawable-canvas`를 실행하세요.")
+                             st.session_state.postits[page_key]["objects"] = canvas_result.json_data["objects"]
                     st.image(pil_image, use_container_width=True)
 
-# --- Right: AI Assistant (Clean Version) ---
+                    else:
+                        st.image(pil_image, use_container_width=True)
+                        st.warning("Canvas library missing. Please install streamlit-drawable-canvas.")
+
+            # --- Right: AI Assistant ---
+            # Right: AI Assistant
 with col_ai:
 with st.container(border=True):
 ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
@@ -746,8 +815,17 @@ st.session_state.last_page_sig = psig
 sub_db = filter_db_by_subject(target_subj, st.session_state.db)
 st.session_state.last_related = find_relevant_jokbo(p_text, sub_db)
 st.session_state.last_ai_sig = None
+                            st.session_state.focused_content_id = None # Reset focus on page turn
 
 rel = st.session_state.last_related
+
+                    # Canvas selection Logic (Reverse Lookup)
+                    # If canvas has selection, find content_id and highlight.
+                    if st_canvas and canvas_result and canvas_result.json_data:
+                         # Very basic selection detection: if only 1 object is in 'objects' array of the return payload? No, it returns all.
+                         # We can't detect click easily.
+                         # Alternative: Use Pin button to place, and Button here to find on PDF.
+                         pass
 
 with ai_tab1:
 if analysis_ready:
@@ -764,18 +842,49 @@ st.markdown(st.session_state.last_ai_text)
 else:
 if has_jokbo_evidence(rel):
 st.markdown("##### 🔥 관련 족보 문항")
-for r in rel[:2]:
+                                    for i, r in enumerate(rel[:2]):
+                                    for r in rel[:2]:
 score = r['score']
 src = r['content'].get('source', 'Unknown')
 txt = r['content'].get('text', '')[:300]
-formatted_txt = format_jokbo_text(txt)
-st.markdown(f"""
-                                       <div class="jokbo-item">
-                                           <div class="jokbo-source">출처: {src} (유사도 {score:.2f})</div>
-                                           {formatted_txt}...
-                                       </div>
-                                       """, unsafe_allow_html=True)
+                                        # Generate unique ID for linking
+                                        item_id = f"jokbo_{hash(txt)}"
+                                        
+                                        # Highlight logic
+                                        is_focused = (st.session_state.focused_content_id == item_id)
+                                        bg_style = "highlight-box" if is_focused else ""
+                                        
+                                        # Pin Button Col
+                                        c_txt, c_pin = st.columns([5, 1])
+                                        
+                                        with c_txt:
+                                            formatted_txt = format_jokbo_text(txt)
+                                            st.markdown(f"""
+                                            <div class="jokbo-item {bg_style}" id="{item_id}">
+                                                <div class="jokbo-source">출처: {src} (유사도 {score:.2f})</div>
+                                                {formatted_txt}...
+                                            </div>
+                                            """, unsafe_allow_html=True)
+                                        
+                                        with c_pin:
+                                            # 1. Pin Button
+                                            if st.button("📌", key=f"pin_{item_id}", help="왼쪽 강의록에 부착하기"):
+                                                st.session_state.pin_payload = {"content_id": item_id, "text": "족보", "source_type": "족보"}
+                                                st.toast("좌측 강의록의 원하는 위치를 클릭하세요!", icon="📍")
+                                            
+                                            # 2. Locate Button (Find on PDF)
+                                            if st.button("🔍", key=f"find_{item_id}", help="강의록에서 위치 찾기"):
+                                                st.session_state.focused_postit_id = item_id
+                                                st.rerun()
 
+                                        formatted_txt = format_jokbo_text(txt)
+                                        st.markdown(f"""
+                                        <div class="jokbo-item">
+                                            <div class="jokbo-source">출처: {src} (유사도 {score:.2f})</div>
+                                            {formatted_txt}...
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                    
 aisig = (psig, target_subj)
 if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
 with st.spinner("족보 기반 심층 분석 중..."):
@@ -809,9 +918,18 @@ else:
 st.info("분석할 텍스트가 없습니다.")
 
 with ai_tab2:
-for msg in st.session_state.chat_history:
+                        for idx, msg in enumerate(st.session_state.chat_history):
+                        for msg in st.session_state.chat_history:
 with st.chat_message(msg["role"]):
 st.markdown(msg["content"])
+                                # Add pin button for AI responses
+                                if msg["role"] == "assistant":
+                                    c_p1, c_p2 = st.columns([0.1, 0.9])
+                                    with c_p1:
+                                        msg_id = f"chat_{idx}"
+                                        if st.button("📌", key=f"pin_chat_{idx}", help="이 답변을 강의록에 붙이기"):
+                                            st.session_state.pin_payload = {"content_id": msg_id, "text": "AI답변", "source_type": "AI 조교"}
+                                            st.toast("좌측 강의록의 원하는 위치를 클릭하세요!", icon="📍")
 
 if prompt := st.chat_input("질문하세요 (예: 이거 시험에 나와?)"):
 if not st.session_state.api_key_ok: st.error("API Key 필요")
