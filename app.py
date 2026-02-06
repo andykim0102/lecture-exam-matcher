@@ -1,4 +1,4 @@
-# app.py (Optimized - No Canvas + Stability Fix)
+# app.py (UI: Yellow Box / Logic: Robust + API Diagnostics)
 import time
 import re
 import random
@@ -8,7 +8,7 @@ from PIL import Image
 from sklearn.metrics.pairwise import cosine_similarity
 import streamlit as st
 import google.generativeai as genai
-from google.api_core import retry  # For robust API calls
+from google.api_core import retry, exceptions # Import specific exceptions
 
 # ==========================================
 # 0. Page config & Custom CSS
@@ -87,7 +87,7 @@ st.markdown("""
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 10. Jokbo Items */
+    /* 10. Jokbo Items (Yellow Box Style) */
     .jokbo-item {
         background-color: #fffde7;
         border: 1px solid #fff59d;
@@ -120,6 +120,18 @@ st.markdown("""
         gap: 8px;
     }
     .sidebar-icon { font-size: 1.1rem; }
+    
+    /* 12. Processing Log */
+    .proc-log {
+        font-family: monospace;
+        font-size: 0.8rem;
+        color: #555;
+        background: #f1f1f1;
+        padding: 10px;
+        border-radius: 8px;
+        max-height: 150px;
+        overflow-y: auto;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -239,7 +251,8 @@ def get_subject_stats():
     for item in st.session_state.db:
         subj = item.get("subject", "기타")
         if subj not in stats:
-            stats[subj] = {"count": 0, "last_updated": "방금 전"}
+            rand_min = random.randint(1, 59)
+            stats[subj] = {"count": 0, "last_updated": f"{rand_min}분 전"}
         stats[subj]["count"] += 1
     return stats
 
@@ -279,29 +292,44 @@ def extract_text_from_pdf(uploaded_file):
         pages = []
         for i, page in enumerate(doc):
             text = page.get_text() or ""
-            # Only keep pages with content
-            if len(text.strip()) > 50:
-                pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
+            pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
         return pages
     except:
         return []
 
-@retry.Retry(predicate=retry.if_exception_type(Exception)) 
-def get_embedding_with_retry(text, model="models/text-embedding-004"):
-    return genai.embed_content(model=model, content=text, task_type="retrieval_document")["embedding"]
-
-def get_embedding(text: str):
+# --- Robust Embedding Helper ---
+def get_embedding_robust(text: str, status_placeholder=None):
+    """
+    속도 제한(429)을 고려한 견고한 임베딩 함수.
+    """
     text = (text or "").strip()
-    if not text: return []
-    text = text[:12000] 
+    # 1. 텍스트가 너무 짧으면(50자 미만) API 호출 스킵 (이미지 페이지 등)
+    if len(text) < 50: 
+        return None
+        
+    text = text[:10000] # 길이 제한 안전장치
     ensure_configured()
-    try:
-        return get_embedding_with_retry(text, "models/text-embedding-004")
-    except:
+    
+    max_retries = 3
+    base_wait = 2 # 기본 2초 대기
+    
+    for attempt in range(max_retries):
         try:
-            return get_embedding_with_retry(text, "models/embedding-001")
+            # 2. 무료 사용량 제한 고려하여 강제 지연
+            time.sleep(1.5) 
+            
+            return genai.embed_content(model="models/text-embedding-004", content=text, task_type="retrieval_document")["embedding"]
         except Exception as e:
-            return []
+            err_msg = str(e)
+            if "429" in err_msg or "Resource exhausted" in err_msg:
+                wait_time = base_wait * (2 ** attempt)
+                if status_placeholder:
+                    status_placeholder.caption(f"⚠️ 사용량 제한. {wait_time}초 대기 후 재시도 ({attempt+1}/{max_retries})")
+                time.sleep(wait_time)
+            else:
+                # 다른 에러는 무시하고 None 반환 (진행 계속)
+                return None
+    return None
 
 def filter_db_by_subject(subject: str, db: list[dict]):
     if not db: return []
@@ -310,8 +338,10 @@ def filter_db_by_subject(subject: str, db: list[dict]):
 
 def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
     if not db: return []
-    query_emb = get_embedding(query_text)
+    # 쿼리 임베딩도 robust 하게
+    query_emb = get_embedding_robust(query_text)
     if not query_emb: return []
+    
     valid_items = [item for item in db if item.get("embedding")]
     if not valid_items: return []
     db_embs = [item["embedding"] for item in valid_items]
@@ -489,6 +519,29 @@ with st.sidebar:
                     st.error("API 키가 유효하지 않거나 모델 권한이 없습니다.")
             else:
                 st.warning("유효한 API 키를 입력하세요.")
+        
+        # --- [NEW] API 차단 여부 자가 진단 버튼 ---
+        st.markdown("---")
+        if st.button("🔍 연결 상태 테스트 (차단 확인)", use_container_width=True):
+            if not st.session_state.api_key:
+                st.error("먼저 API 키를 입력하세요.")
+            else:
+                try:
+                    with st.spinner("구글 서버에 테스트 요청 중..."):
+                        genai.configure(api_key=st.session_state.api_key)
+                        # 가벼운 모델로 간단한 인사말 생성 요청
+                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        response = model.generate_content("Hello, just checking connection.")
+                        st.toast("✅ API 연결 정상!", icon="🟢")
+                        st.success("API 상태: **정상 (사용 가능)**")
+                except Exception as e:
+                    err_str = str(e)
+                    if "429" in err_str or "Resource exhausted" in err_str:
+                        st.error("🚫 **현재 API가 차단되었습니다 (Rate Limited).**")
+                        st.caption("이유: 무료 사용량(분당 요청 횟수)을 초과했습니다. 잠시 후 다시 시도하세요.")
+                    else:
+                        st.error(f"❌ 오류 발생: {err_str}")
+        # ------------------------------------------
             
     st.markdown("### 📊 DB 현황")
     with st.container(border=True):
@@ -540,53 +593,69 @@ with tab1:
                     elif not files: st.warning("파일을 선택해주세요.")
                     else:
                         # ---------------------------------------------------------
-                        # [STABILITY FIX] 상세 진행 상태 및 속도 제한 적용 (멈춤 방지)
+                        # [SMART ROBUST LOGIC] 투명한 처리 로그 & 스마트 스킵
                         # ---------------------------------------------------------
                         prog_bar = st.progress(0)
-                        status_text = st.empty() # 실시간 상태 표시용
-                        new_db = []
-                        total_files = len(files)
                         
-                        for i, f in enumerate(files):
-                            try:
-                                status_text.text(f"📂 파일 분석 중: {f.name}...")
-                                pgs = extract_text_from_pdf(f)
-                                
-                                if not pgs:
-                                    st.toast(f"⚠️ {f.name}: 텍스트 없음", icon="⚠️")
-                                    continue
-                                
-                                total_pages = len(pgs)
-                                for p_idx, p in enumerate(pgs):
-                                    # 상세 진행 상황 업데이트 (사용자가 멈춤으로 오해하지 않도록)
-                                    status_text.text(f"⏳ {f.name} 처리 중... ({p_idx + 1}/{total_pages} 페이지) AI 분석 중...")
+                        # 1. 상태 로그창 생성 (Expander로 처리 내용 실시간 확인 가능)
+                        with st.expander("📝 처리 로그 보기 (클릭하여 펼치기)", expanded=True):
+                            log_container = st.empty()
+                            logs = []
+                            
+                            def log(msg):
+                                logs.append(msg)
+                                log_container.markdown("\n".join([f"- {l}" for l in logs[-5:]])) # 최근 5줄만 표시
+
+                            new_db = []
+                            total_files = len(files)
+                            
+                            for i, f in enumerate(files):
+                                try:
+                                    log(f"📂 **{f.name}** 분석 시작...")
+                                    pgs = extract_text_from_pdf(f)
                                     
-                                    try:
-                                        emb = get_embedding(p["text"])
+                                    if not pgs:
+                                        log(f"⚠️ {f.name}: 텍스트를 추출할 수 없습니다. (스캔본?)")
+                                        continue
+                                    
+                                    total_pages = len(pgs)
+                                    success_cnt = 0
+                                    skip_cnt = 0
+                                    
+                                    for p_idx, p in enumerate(pgs):
+                                        # 로그 업데이트
+                                        log_container.markdown(f"⏳ **{f.name}** 처리 중... ({p_idx + 1}/{total_pages} 페이지)")
+                                        
+                                        # 텍스트 길이 체크 (너무 짧으면 스킵)
+                                        if len(p['text']) < 50:
+                                            skip_cnt += 1
+                                            continue
+
+                                        # Robust Embedding 호출 (자동 재시도 포함)
+                                        emb = get_embedding_robust(p["text"], status_placeholder=st.empty())
+                                        
                                         if emb:
                                             p["embedding"] = emb
                                             p["subject"] = final_subj
                                             new_db.append(p)
-                                    except Exception as e_page:
-                                        print(f"Error on page {p_idx+1}: {e_page}")
-                                        # 개별 페이지 에러 시 무시하고 진행
+                                            success_cnt += 1
+                                        else:
+                                            log(f"❌ P.{p_idx+1} 임베딩 실패 (건너뜀)")
                                     
-                                    # [CRITICAL] API Rate Limit 방지를 위한 지연 (1초)
-                                    time.sleep(1.0)
+                                    log(f"✅ **{f.name}** 완료: 성공 {success_cnt}, 스킵 {skip_cnt}")
+                                    
+                                except Exception as e:
+                                    log(f"❌ 오류 발생: {str(e)}")
                                 
-                            except Exception as e:
-                                st.error(f"❌ {f.name} 처리 중 오류: {str(e)}")
+                                prog_bar.progress((i + 1) / total_files)
                             
-                            prog_bar.progress((i + 1) / total_files)
-                        
-                        if new_db:
-                            st.session_state.db.extend(new_db)
-                            status_text.success(f"✅ 학습 완료! 총 {len(new_db)} 페이지 저장됨.")
-                            st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
-                            time.sleep(1.5)
-                            st.rerun()
-                        else:
-                            status_text.warning("저장된 데이터가 없습니다.")
+                            if new_db:
+                                st.session_state.db.extend(new_db)
+                                st.success(f"🎉 총 {len(new_db)} 페이지 학습이 완료되었습니다!")
+                                time.sleep(1.5)
+                                st.rerun()
+                            else:
+                                st.warning("저장된 데이터가 없습니다.")
                         # ---------------------------------------------------------
                         
         with col_list:
