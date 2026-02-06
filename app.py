@@ -72,12 +72,33 @@ st.markdown("""
         font-size: 0.75rem;
     }
 
+    /* Twin Problem Card Style (Restored) */
+    .twin-card {
+        background-color: #f5faff;
+        border: 1px solid #bbdefb;
+        border-radius: 12px;
+        padding: 20px;
+        margin-top: 15px;
+        box-shadow: 0 2px 8px rgba(33,150,243,0.08);
+    }
+    .twin-badge {
+        background-color: #2196f3;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-weight: 700;
+        font-size: 0.75rem;
+        margin-bottom: 10px;
+        display: inline-block;
+    }
+
     /* Answer/Explanation Box */
     .ans-box {
         background-color: #f1f8e9;
         border-radius: 8px;
         padding: 16px;
         margin-top: 12px;
+        border-left: 4px solid #7cb342;
         animation: fadeIn 0.3s ease-in-out;
     }
     @keyframes fadeIn {
@@ -115,7 +136,9 @@ DEFAULT_STATE = {
     "chat_history": [],
     "hot_pages": [],      # For Hot Page Analysis
     "hot_pages_analyzed": False,
-    "transcribed_text": "" # For Audio Tab
+    "transcribed_text": "", # For Audio Tab
+    "tr_res": None,         # For Transcript Analysis Result
+    "api_key_ok": False     # To track API status
 }
 
 for k, v in DEFAULT_STATE.items():
@@ -192,7 +215,7 @@ def generate_ai_analysis(question_text):
     {{
         "answer": "String (e.g., 3)",
         "explanation": "String (Detailed logic)",
-        "twin_problem": "String (Full question text)",
+        "twin_problem": "String (Full question text with options)",
         "twin_answer": "String",
         "twin_explanation": "String"
     }}
@@ -228,18 +251,46 @@ def analyze_hot_pages(doc, subject):
         
     return sorted(hot_list, key=lambda x: x["score"], reverse=True)[:15]
 
+# --- Transcription & Analysis Helpers (Restored) ---
 def transcribe_audio_gemini(audio_bytes):
     if not st.session_state.api_key: return None
     try:
         genai.configure(api_key=st.session_state.api_key)
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content([
-            "Transcribe this audio file into text accurately.",
+            "Please transcribe the following audio file into text accurately. Do not add any conversational text, just the transcription.",
             {"mime_type": "audio/wav", "data": audio_bytes}
         ])
         return response.text
     except Exception as e:
         return f"Error: {str(e)}"
+
+def chunk_transcript(text):
+    """Splits long text into manageable chunks for AI analysis."""
+    return [text[i:i+900] for i in range(0, len(text), 900)]
+
+def build_transcript_prompt(chunks, related_packs, subject):
+    """Constructs a prompt to summarize lecture based on Exam questions."""
+    packed = ""
+    for idx, (chunk, rel) in enumerate(zip(chunks, related_packs), 1):
+        if not rel or rel[0]["score"] < 0.6: continue
+        ctx = "\n".join([f"- {r['content']['text'][:200]}" for r in rel[:2]])
+        packed += f"\n(구간 {idx})\n[강의] {chunk}\n[관련 족보] {ctx}\n"
+    
+    if not packed: return "족보와 밀접한 관련이 있는 내용이 부족합니다. 일반적인 요약을 제공해주세요."
+    
+    return f"""
+    당신은 의대 조교입니다. 강의 녹음 전사본을 족보(기출문제) 데이터와 대조하여 요약했습니다.
+    
+    [과목]: {subject}
+    [분석 내용]:
+    {packed}
+    
+    위 내용을 바탕으로 다음 형식의 보고서를 작성하세요:
+    1. **🔍 족보 적중 포인트**: 강의 내용 중 기출문제와 직결되는 핵심 개념.
+    2. **📝 강의 요약**: 전체적인 흐름 요약.
+    3. **⚠️ 예상 출제 문제**: 강의 내용에 기반한 예상 질문.
+    """
 
 # ==========================================
 # 3. UI Components
@@ -272,7 +323,9 @@ def sidebar_ui():
         # Settings
         with st.expander("⚙️ 설정 (API Key)"):
             key_input = st.text_input("Gemini API Key", value=st.session_state.api_key, type="password")
-            if key_input: st.session_state.api_key = key_input
+            if key_input: 
+                st.session_state.api_key = key_input
+                st.session_state.api_key_ok = True
 
 def login_screen():
     c1, c2, c3 = st.columns([1,1,1])
@@ -365,7 +418,8 @@ def main_study_ui():
                     with st.spinner("🔍 분석 중..."):
                         st.session_state.current_related_qs = find_relevant_questions(
                             current_text, 
-                            st.session_state.selected_subject
+                            st.session_state.selected_subject,
+                            threshold=0.65  # Strict matching restored
                         )
                         st.session_state.last_page_sig = page_sig
 
@@ -374,6 +428,7 @@ def main_study_ui():
                 if not questions:
                     st.markdown("<div style='text-align:center; padding:30px; color:#888;'>관련 문제가 없습니다.</div>", unsafe_allow_html=True)
                 else:
+                    st.success(f"🔥 {len(questions)}개의 적중 문제를 찾았습니다!")
                     for idx, item in enumerate(questions):
                         q_content = item["content"]["text"]
                         score = item["score"]
@@ -385,7 +440,7 @@ def main_study_ui():
                                 <span class="q-badge">유사도 {int(score*100)}%</span>
                                 <span>{item['content']['source']} (P.{item['content']['page']})</span>
                             </div>
-                            <div class="q-text">{q_content[:200]}...</div>
+                            <div class="q-text">{q_content[:300]}...</div>
                         </div>
                         """, unsafe_allow_html=True)
 
@@ -407,16 +462,24 @@ def main_study_ui():
                         if st.session_state[show_ans_key]:
                             data = st.session_state.analyzed_data.get(q_id)
                             if data:
+                                # Render Answer Box
                                 st.markdown(f"""
                                 <div class="ans-box">
                                     <strong>✅ 정답: {data.get('answer')}</strong><br><br>
                                     {data.get('explanation')}
                                 </div>
                                 """, unsafe_allow_html=True)
-                                with st.expander("🧩 변형 문제 (Twin Problem)"):
-                                    st.write(data.get('twin_problem'))
+                                
+                                # Render Twin Problem
+                                with st.expander("🧩 쌍둥이(변형) 문제 도전하기"):
+                                    st.markdown(f"""
+                                    <div class="twin-card">
+                                        <div class="twin-badge">TWIN PROBLEM</div>
+                                        <div>{data.get('twin_problem')}</div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
                                     if st.button("변형 문제 답 보기", key=f"twin_{q_id}"):
-                                        st.write(f"정답: {data.get('twin_answer')}")
+                                        st.info(f"정답: {data.get('twin_answer')}\n\n해설: {data.get('twin_explanation')}")
 
         # Tab 2: AI Tutor (Chat)
         with r_tab2:
@@ -501,24 +564,64 @@ def management_ui():
             st.caption("저장된 문제 없음")
 
 def record_ui():
-    st.markdown("## 🎙️ 강의 녹음 및 분석")
-    col1, col2 = st.columns(2)
-    with col1:
-        audio_val = st.audio_input("녹음 시작")
-        if audio_val and st.button("분석 시작"):
-            with st.spinner("텍스트 변환 및 족보 매칭 중..."):
-                txt = transcribe_audio_gemini(audio_val.getvalue())
-                st.session_state.transcribed_text = txt
+    st.markdown("## 🎙️ 강의 녹음 및 심층 분석")
+    st.caption("강의를 녹음하거나 텍스트를 입력하면, 족보 데이터와 대조하여 '적중 포인트'를 찾아줍니다.")
     
-    with col2:
-        st.markdown("### 분석 결과")
-        if st.session_state.transcribed_text:
+    with st.container(border=True):
+        mode = st.radio("입력 방식", ["🎤 음성 녹음", "📝 텍스트/파일"], horizontal=True)
+        target_text = ""
+        
+        if mode == "🎤 음성 녹음":
+            audio_val = st.audio_input("녹음 시작")
+            if audio_val and st.button("🚀 분석 시작", type="primary"):
+                if not st.session_state.api_key: st.error("API Key 필요")
+                else:
+                    with st.spinner("음성을 텍스트로 변환 중..."):
+                        txt = transcribe_audio_gemini(audio_val.getvalue())
+                        if txt:
+                            st.session_state.transcribed_text = txt
+                            target_text = txt
+                        else:
+                            st.error("변환 실패")
+        else:
+            txt_in = st.text_area("강의 내용 입력", height=150)
+            if st.button("🚀 분석 시작", type="primary"):
+                target_text = txt_in
+                st.session_state.transcribed_text = txt_in
+
+        # Analysis Logic
+        if target_text:
+            st.session_state.transcribed_text = target_text
+            with st.spinner("🔍 족보 데이터와 대조하여 적중 노트 생성 중..."):
+                # 1. Chunking
+                chunks = chunk_transcript(target_text)[:10] # Limit to first 10 chunks to save tokens
+                
+                # 2. Find Related Questions for each chunk
+                subject = st.session_state.selected_subject or "전체"
+                related_packs = []
+                for chk in chunks:
+                    rels = find_relevant_questions(chk, subject, threshold=0.55, top_k=3) # Lower threshold for broad context
+                    related_packs.append(rels)
+                
+                # 3. Generate Report
+                genai.configure(api_key=st.session_state.api_key)
+                model = genai.GenerativeModel("gemini-1.5-flash")
+                prompt = build_transcript_prompt(chunks, related_packs, subject)
+                
+                try:
+                    res = model.generate_content(prompt)
+                    st.session_state.tr_res = res.text
+                except Exception as e:
+                    st.error(f"분석 중 오류: {e}")
+
+    # Result Display
+    if st.session_state.tr_res:
+        st.divider()
+        st.markdown("### 📊 분석 결과 리포트")
+        st.info(st.session_state.tr_res)
+        
+        with st.expander("원본 텍스트 보기"):
             st.write(st.session_state.transcribed_text)
-            st.divider()
-            st.markdown("**💡 추천 학습 포인트**")
-            rels = find_relevant_questions(st.session_state.transcribed_text, st.session_state.selected_subject or "전체")
-            for r in rels[:3]:
-                st.info(f"관련 족보: {r['content']['text'][:100]}...")
 
 # ==========================================
 # 4. Main Execution
