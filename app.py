@@ -299,8 +299,11 @@ def get_embedding_robust(text: str, status_placeholder=None):
     text = text[:10000] # 길이 제한 안전장치
     ensure_configured()
     
-    max_retries = 3
-    base_wait = 2
+    # ----------------------------------------------------
+    # [UPDATED] 더 강력한 재시도 정책 적용 (Free Tier 대응)
+    # ----------------------------------------------------
+    max_retries = 5  # 재시도 횟수 증가 (3 -> 5)
+    base_wait = 3    # 기본 대기 시간 증가
     
     # 시도할 모델 목록: 최신 모델이 안 되면 구형 모델로 자동 전환 (Fallback)
     candidate_models = ["models/text-embedding-004", "models/embedding-001"]
@@ -308,8 +311,8 @@ def get_embedding_robust(text: str, status_placeholder=None):
     for model_name in candidate_models:
         for attempt in range(max_retries):
             try:
-                # 무료 API 속도 제한 고려하여 강제 지연 (특히 중요)
-                time.sleep(1.5) 
+                # 무료 API 속도 제한 고려하여 강제 지연 (기본 2초로 증가)
+                time.sleep(2.0) 
                 
                 if "004" in model_name:
                     # 최신 모델용 파라미터
@@ -325,9 +328,10 @@ def get_embedding_robust(text: str, status_placeholder=None):
                 err_msg = str(e)
                 # Rate Limit 에러인 경우: 대기 후 같은 모델 재시도
                 if "429" in err_msg or "Resource exhausted" in err_msg:
-                    wait_time = base_wait * (2 ** attempt)
+                    # 429 에러는 지수 백오프 + 추가 시간으로 충분히 기다림
+                    wait_time = base_wait * (2 ** attempt) + 5 
                     if status_placeholder:
-                        status_placeholder.caption(f"⚠️ {model_name}: 사용량 많음. {wait_time}초 대기... ({attempt+1}/{max_retries})")
+                        status_placeholder.caption(f"⚠️ {model_name}: 사용량 초과(429). {wait_time}초 쿨다운 중... ({attempt+1}/{max_retries})")
                     time.sleep(wait_time)
                 # 모델을 찾을 수 없거나(404) 권한 문제 등 치명적 에러: 즉시 다음 모델로 넘어감
                 elif "404" in err_msg or "Not Found" in err_msg or "Permission" in err_msg:
