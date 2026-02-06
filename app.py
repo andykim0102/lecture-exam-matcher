@@ -1,7 +1,8 @@
-# app.py (UI: Original Rich Style / Logic: Smart Model Discovery + OCR Fallback + Robust Parsing 2.0)
+# app.py (UI: Original Rich Style / Logic: Smart Model Discovery + OCR Fallback + Robust Parsing 2.0 + Hot Page Nav)
 import time
 import re
 import random
+import json
 import numpy as np
 import fitz  # PyMuPDF
 from PIL import Image
@@ -15,7 +16,7 @@ from google.api_core import retry, exceptions
 # ==========================================
 st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
 
-# Custom CSS for UI Enhancement (Original Style Restored)
+# Custom CSS for UI Enhancement
 st.markdown("""
 <style>
     /* 1. Force Light Mode & Colors */
@@ -120,6 +121,9 @@ st.markdown("""
         gap: 8px;
     }
     .sidebar-icon { font-size: 1.1rem; }
+    
+    /* 12. Hot Page Button */
+    .hot-page-btn-score { font-size: 0.8em; color: #ff3b30; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -133,7 +137,11 @@ defaults = {
     "lecture_doc": None, "lecture_filename": None, "current_page": 0,
     "edit_target_subject": None, "subject_detail_view": None, "t2_selected_subject": None,
     "transcribed_text": "", "chat_history": [],
-    "last_page_sig": None, "last_ai_sig": None, "last_ai_text": "", "last_related": []
+    "last_page_sig": None, "last_ai_sig": None, "last_ai_text": "", "last_related": [],
+    # Interactive Parsing
+    "parsed_items": {}, "twin_items": {},
+    # Hot Page Navigation
+    "hot_pages": [], "hot_pages_analyzed": False
 }
 
 for k, v in defaults.items():
@@ -225,7 +233,7 @@ def get_embedding_robust(text: str, status_placeholder=None):
     for model_name in sorted_candidates[:2]:
         for attempt in range(max_retries):
             try:
-                time.sleep(1.5) 
+                time.sleep(1.0) 
                 if "004" in model_name:
                     res = genai.embed_content(model=model_name, content=text, task_type="retrieval_document")
                 else:
@@ -316,6 +324,73 @@ def transcribe_image_to_text(image, api_key):
     except Exception:
         return None
 
+# ==========================================
+# 4. New LLM Logic (Parser & Generator)
+# ==========================================
+
+def parse_raw_jokbo_llm(raw_text):
+    """
+    LLM을 사용하여 엉망인 족보 텍스트를 구조화된 JSON으로 변환
+    """
+    prompt = f"""
+    You are an expert exam data parser.
+    Analyze the following raw text which may contain a mix of questions, choices, answers, and explanations.
+    Structure it into a clean JSON object.
+    
+    [Raw Text]
+    {raw_text}
+    
+    [Requirements]
+    1. Extract the 'question' (main problem text).
+    2. Extract 'choices' as a list of strings if it's a multiple choice question.
+    3. Extract 'answer' if present.
+    4. Extract 'explanation' if present.
+    5. Detect 'type' ("객관식" or "주관식").
+    6. Return ONLY the JSON object. Do not include markdown formatting like ```json.
+    """
+    
+    try:
+        res_text, _ = generate_with_fallback(prompt, st.session_state.text_models)
+        # Clean up code blocks if model adds them
+        clean_text = re.sub(r"```json|```", "", res_text).strip()
+        parsed = json.loads(clean_text)
+        return {"success": True, "data": parsed}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def generate_twin_problem_llm(parsed_data, subject):
+    """
+    구조화된 데이터를 기반으로 쌍둥이 문제(변형 문제) 생성
+    """
+    data = parsed_data["data"]
+    prompt = f"""
+    Create a 'Twin Problem' for medical students based on the following exam data.
+    Subject: {subject}
+    
+    [Original Problem Data]
+    {json.dumps(data, ensure_ascii=False)}
+    
+    [Instructions]
+    1. Create a NEW problem with the same logic, difficulty, and concept.
+    2. Change the scenario, values, or clinical case slightly so it's not identical.
+    3. Provide the correct answer and a detailed logic explanation.
+    
+    [Output Format]
+    **[변형 문제]**
+    (Question Text)
+    (Choices if applicable)
+    
+    **[정답 및 해설]**
+    **정답:** (Answer)
+    **해설:** (Detailed Logic)
+    """
+    
+    try:
+        res_text, _ = generate_with_fallback(prompt, st.session_state.text_models)
+        return res_text
+    except Exception as e:
+        return f"문제 생성 실패: {str(e)}"
+
 # --- Prompt Builders (Improved with Persona) ---
 def build_overview_prompt(first_page_text, subject):
     return f"""
@@ -329,44 +404,6 @@ def build_overview_prompt(first_page_text, subject):
     1. 🏁 이 강의의 핵심 목표 (한 줄)
     2. 🚩 족보 기반 공부 전략 (3가지 포인트)
     3. ⚠️ 주의해야 할 점
-    """
-
-# [UPDATED 2.0] 더욱 강력한 포맷팅 강제
-def build_page_analysis_prompt(lecture_text, related_jokbo, subject):
-    jokbo_ctx = "\n".join([f"- {r['content']['text'][:300]}" for r in related_jokbo[:3]])
-    return f"""
-    당신은 의대생 후배의 공부를 도와주는 유능한 '수석 조교'입니다.
-    현재 강의록 페이지와 연관된 족보(기출) 데이터를 분석하여, 시험에 직결되는 실전 팁을 제공하세요.
-    
-    [과목]: {subject}
-    
-    [참고할 족보/기출 데이터]
-    {jokbo_ctx}
-    
-    [현재 강의록 페이지 내용]
-    {lecture_text[:1500]}
-    
-    ---
-    
-    **작성 필수 지침:**
-    답변은 **반드시** 아래 3개의 섹션 헤더를 사용하여 명확히 구분해야 합니다.
-    각 섹션의 헤더 `[SECTION: ...]`를 절대 생략하거나 변형하지 마십시오.
-    
-    [SECTION: DIRECTION]
-    **"이 페이지, 이렇게 공부해야 시험에 붙는다!"**
-    족보(기출) 출제 경향을 바탕으로, 해당 페이지에서 무엇을 외워야 하고 무엇을 버려야 하는지 명확한 가이드를 제시하세요.
-    - 💡 **핵심 포인트**: (시험에 자주 나오는 개념 콕 집어주기)
-    - ⚠️ **주의사항**: (함정으로 나오기 쉬운 부분)
-    
-    [SECTION: TWIN_Q]
-    위 족보 문제와 **문제 유형, 형식, 난이도가 완벽히 동일한** '쌍둥이 문제(변형 문제)'를 1문제 만드세요.
-    - 기출 문제의 논리를 그대로 따르되 숫자나 상황만 살짝 비틀어 연습할 수 있게 하세요.
-    - 객관식이라면 보기 5개를 반드시 포함하세요.
-    
-    [SECTION: EXPLANATION]
-    위 쌍둥이 문제의 **정답 및 상세 해설**을 작성하세요.
-    - 단순히 "답은 A다"가 아니라, **"왜 A가 답이고, 나머지는 왜 오답인지"** 의대생 시각에서 논리적으로 설명하세요.
-    - 암기 팁이나 두문자(Mnemonic)가 있다면 함께 알려주세요.
     """
 
 def build_chat_prompt(history: list, context_text: str, related_jokbo: list, question: str):
@@ -692,10 +729,96 @@ with tab2:
                     st.session_state.current_page = 0
                     st.session_state.last_page_sig = None
                     st.session_state.chat_history = [] 
+                    st.session_state.parsed_items = {}
+                    st.session_state.twin_items = {}
+                    # Hot Pages Reset
+                    st.session_state.hot_pages = []
+                    st.session_state.hot_pages_analyzed = False
 
         if st.session_state.lecture_doc:
             doc = st.session_state.lecture_doc
             
+            # --- [NEW] Hot Page Discovery ---
+            with st.expander("🔥 족보 적중 페이지 탐색기", expanded=not st.session_state.hot_pages_analyzed):
+                if not st.session_state.hot_pages_analyzed:
+                    st.markdown("강의록 전체를 스캔하여 족보와 연관성이 높은 **'적중 페이지'**를 찾아냅니다.")
+                    if st.button("🚀 전체 페이지 분석 시작 (AI Scan)", type="primary"):
+                        if not st.session_state.api_key_ok:
+                            st.error("설정 탭에서 API Key를 먼저 연결해주세요.")
+                        else:
+                            # 1. Prepare DB Check
+                            sub_db = filter_db_by_subject(target_subj, st.session_state.db)
+                            if not sub_db:
+                                st.warning(f"'{target_subj}' 과목의 족보 데이터가 없습니다.")
+                            else:
+                                results = []
+                                valid_db_items = [x for x in sub_db if x.get("embedding")]
+                                db_embs = [x["embedding"] for x in valid_db_items]
+                                
+                                if not db_embs:
+                                    st.warning("족보 데이터에 임베딩 정보가 없습니다.")
+                                else:
+                                    # 2. Scanning Loop
+                                    prog_bar = st.progress(0)
+                                    status_txt = st.empty()
+                                    
+                                    total_pages = len(doc)
+                                    
+                                    for p_idx in range(total_pages):
+                                        status_txt.caption(f"Analyzing Page {p_idx+1}/{total_pages}...")
+                                        try:
+                                            page = doc.load_page(p_idx)
+                                            txt = page.get_text().strip()
+                                            
+                                            # Optimization: Skip empty pages, limit text length
+                                            if len(txt) > 30: 
+                                                emb, _ = get_embedding_robust(txt)
+                                                if emb:
+                                                    sims = cosine_similarity([emb], db_embs)[0]
+                                                    max_score = max(sims)
+                                                    
+                                                    # Threshold for "Hot Page"
+                                                    if max_score >= 0.60:
+                                                        results.append({"page": p_idx, "score": max_score})
+                                        except Exception:
+                                            pass
+                                        
+                                        # Update progress
+                                        prog_bar.progress((p_idx+1)/total_pages)
+                                    
+                                    # 3. Store Results
+                                    st.session_state.hot_pages = sorted(results, key=lambda x: x["score"], reverse=True)
+                                    st.session_state.hot_pages_analyzed = True
+                                    st.rerun()
+                else:
+                    # Display Navigation
+                    c_head, c_reset = st.columns([4, 1])
+                    with c_head:
+                        if not st.session_state.hot_pages:
+                            st.info("매칭되는 적중 페이지를 찾지 못했습니다. (임계값 0.6 미만)")
+                        else:
+                            st.markdown(f"**🔥 총 {len(st.session_state.hot_pages)}개의 적중 페이지 발견!** (클릭하여 이동)")
+                    with c_reset:
+                        if st.button("재분석"):
+                            st.session_state.hot_pages_analyzed = False
+                            st.rerun()
+                    
+                    if st.session_state.hot_pages:
+                        # Grid Layout for Buttons
+                        cols = st.columns(6)
+                        for i, item in enumerate(st.session_state.hot_pages):
+                            p_num = item['page']
+                            score = item['score']
+                            with cols[i % 6]:
+                                btn_label = f"P.{p_num+1}"
+                                if st.button(btn_label, key=f"nav_{p_num}", help=f"적중률 {score:.0%}"):
+                                    st.session_state.current_page = p_num
+                                    st.session_state.last_page_sig = None
+                                    st.rerun()
+                                st.markdown(f"<div style='text-align:center; font-size:0.75rem; color:#ff3b30; margin-top:-10px;'>{score:.0%}</div>", unsafe_allow_html=True)
+            
+            st.divider()
+
             col_view, col_ai = st.columns([1.8, 1.2])
             
             # --- Left: Viewer (Standard Image) ---
@@ -759,84 +882,61 @@ with tab2:
                                         st.session_state.last_ai_sig = aisig
                                 st.markdown(st.session_state.last_ai_text)
                             else:
-                                if has_jokbo_evidence(rel):
-                                    st.markdown("##### 🔥 관련 족보 문항")
-                                    for r in rel[:2]:
-                                        score = r['score']
-                                        src = r['content'].get('source', 'Unknown')
-                                        txt = r['content'].get('text', '')[:300]
-                                        formatted_txt = format_jokbo_text(txt)
-                                        st.markdown(f"""
-                                        <div class="jokbo-item">
-                                            <div class="jokbo-source">출처: {src} (유사도 {score:.2f})</div>
-                                            {formatted_txt}...
-                                        </div>
-                                        """, unsafe_allow_html=True)
+                                st.markdown(f"##### 🔥 연관 족보 TOP {len(rel[:3])}")
+                                
+                                if not rel:
+                                    st.caption("관련된 족보 내용이 없습니다.")
+                                
+                                # Loop through related items
+                                for i, r in enumerate(rel[:3]):
+                                    item_id = f"{psig}_{i}" # Unique ID for this item on this page
+                                    content = r['content']
+                                    score = r['score']
+                                    raw_txt = content['text']
                                     
-                                    aisig = (psig, target_subj)
-                                    if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
-                                        with st.spinner("족보 기반 심층 분석 중..."):
-                                            prmt = build_page_analysis_prompt(p_text, rel, target_subj)
-                                            raw_res, _ = generate_with_fallback(prmt, st.session_state.text_models)
+                                    with st.container(border=True):
+                                        st.markdown(f"**#{i+1} 유사도 {score:.2f}** <small>({content['source']} P.{content['page']})</small>", unsafe_allow_html=True)
+                                        
+                                        # 1. Raw Text Expander
+                                        with st.expander("📄 원본 텍스트 보기"):
+                                            st.text(raw_txt[:500] + "...")
+                                        
+                                        # 2. Interactive Parse & Twin Gen
+                                        with st.expander("✨ 쌍둥이 문제 만들기", expanded=True):
+                                            # (A) Parsing Step
+                                            if item_id not in st.session_state.parsed_items:
+                                                if st.button("구조 분석 및 파싱", key=f"btn_p_{item_id}"):
+                                                    with st.spinner("AI가 족보 텍스트를 구조화 중..."):
+                                                        parsed = parse_raw_jokbo_llm(raw_txt)
+                                                        st.session_state.parsed_items[item_id] = parsed
+                                                        st.rerun()
                                             
-                                            # [IMPROVED] Robust Parsing 2.0
-                                            clean_res = re.sub(r"```.*?", "", raw_res).replace("```", "").strip()
-                                            
-                                            parsed = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
-                                            
-                                            # Define markers to look for
-                                            markers = ["DIRECTION", "TWIN_Q", "EXPLANATION"]
-                                            found_positions = []
-                                            
-                                            for m in markers:
-                                                # Regex to find flexible section headers:
-                                                # Allows: [SECTION: KEY], **[SECTION: KEY]**, ### SECTION: KEY, etc.
-                                                # Case insensitive
-                                                pattern = r"(?:\[|\*\*|#|\s)*SECTION:\s*" + m + r"(?:\]|\*\*|#|\s)*"
-                                                match = re.search(pattern, clean_res, re.IGNORECASE)
-                                                if match:
-                                                    found_positions.append({"key": m, "start": match.start(), "end": match.end()})
-                                            
-                                            # Sort by appearance in text
-                                            found_positions.sort(key=lambda x: x["start"])
-                                            
-                                            if not found_positions:
-                                                # Fallback: Try finding just the keys if "SECTION:" is missing (Common model error)
-                                                parsed["DIRECTION"] = raw_res
-                                                parsed["TWIN_Q"] = "(자동 파싱 실패 - 상단 내용을 참고하세요)"
+                                            # Show Parsed Result
+                                            parsed_res = st.session_state.parsed_items.get(item_id)
+                                            if parsed_res:
+                                                if parsed_res["success"]:
+                                                    data = parsed_res["data"]
+                                                    st.caption("✅ 파싱 성공")
+                                                    st.markdown(f"**Q:** {data.get('question')}")
+                                                    st.markdown(f"**A:** {data.get('answer')}")
+                                                    
+                                                    # (B) Generation Step
+                                                    if item_id not in st.session_state.twin_items:
+                                                        if st.button("변형 문제 생성", key=f"btn_g_{item_id}", type="primary"):
+                                                            with st.spinner("변형 문제 생성 중..."):
+                                                                twin_res = generate_twin_problem_llm(parsed_res, st.session_state.t2_selected_subject)
+                                                                st.session_state.twin_items[item_id] = twin_res
+                                                                st.rerun()
+                                                    
+                                                    # Show Generated Result
+                                                    twin_res = st.session_state.twin_items.get(item_id)
+                                                    if twin_res:
+                                                        st.divider()
+                                                        st.markdown(twin_res)
+                                                else:
+                                                    st.error("파싱 실패: 텍스트가 너무 불완전합니다.")
                                             else:
-                                                for i, pos in enumerate(found_positions):
-                                                    key = pos["key"]
-                                                    start_idx = pos["end"] # Content starts after header
-                                                    
-                                                    if i < len(found_positions) - 1:
-                                                        end_idx = found_positions[i+1]["start"]
-                                                    else:
-                                                        end_idx = len(clean_res)
-                                                    
-                                                    content = clean_res[start_idx:end_idx].strip()
-                                                    parsed[key] = content
-
-                                            # Safety check
-                                            if not any(v.strip() for v in parsed.values()):
-                                                parsed["DIRECTION"] = raw_res
-
-                                            st.session_state.last_ai_text = parsed
-                                            st.session_state.last_ai_sig = aisig
-                                    
-                                    res_dict = st.session_state.last_ai_text
-                                    if isinstance(res_dict, dict):
-                                        with st.expander("🧭 공부 방향성 보기", expanded=True):
-                                            st.markdown(res_dict.get("DIRECTION", "분석 중..."))
-                                        with st.expander("🧩 쌍둥이 문제 만들기"):
-                                            st.markdown(res_dict.get("TWIN_Q", "생성 중..."))
-                                        with st.expander("✅ 해설 및 정답"):
-                                            st.markdown(res_dict.get("EXPLANATION", "생성 중..."))
-                                    else:
-                                        st.write(res_dict)
-                                else:
-                                    st.info("💡 이 페이지와 직접 연관된 족보 내용은 없습니다.")
-                                    st.caption("가볍게 훑고 넘어가셔도 좋습니다.")
+                                                st.caption("먼저 '구조 분석'을 눌러주세요.")
                         else:
                             st.info("분석할 텍스트가 없습니다.")
 
@@ -918,4 +1018,3 @@ with tab3:
                         st.text(st.session_state.transcribed_text)
             else:
                 st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">결과가 여기에 표시됩니다.</div>""", unsafe_allow_html=True)
-
