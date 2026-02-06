@@ -1,8 +1,7 @@
 # app.py
 # ==============================================================================
-#  Med-Study OS: 의대생을 위한 스마트 학습 어시스턴트
-#  기능: 족보 PDF 분석, 실시간 강의 매칭, 음성 녹음 요약, AI 질의응답
-#  업데이트: AI 재시도 로직 강화, 족보 텍스트 가독성 포매터 개선, UI 수정
+#  Med-Study OS: 의대생을 위한 스마트 학습 어시스턴트 (Premium Version)
+#  기능: 족보 문항별 자동 분리, AI 정밀 분석, 프리미엄 카드 UI
 # ==============================================================================
 
 import time
@@ -27,59 +26,132 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 프리미엄 디자인 CSS
+# 프리미엄 디자인 CSS 적용
 st.markdown("""
 <style>
-    /* Global Fonts & Colors */
-    .stApp { background-color: #f8f9fa; font-family: 'Pretendard', sans-serif; }
+    /* 1. Global Fonts & Colors */
+    @import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.8/dist/web/static/pretendard.css");
+    
+    .stApp { 
+        background-color: #f8f9fa; 
+        font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, Roboto, sans-serif;
+    }
+    
     h1, h2, h3, h4, h5, h6, .stMarkdown { color: #2c3e50 !important; }
     
-    /* Card Container */
+    /* 2. Premium Card Style (Photo-Like) */
     div[data-testid="stVerticalBlockBorderWrapper"] {
         background-color: #ffffff;
         border: 1px solid #eef2f6;
         border-radius: 16px;
         padding: 24px;
-        box-shadow: 0 4px 20px rgba(200, 210, 230, 0.2);
+        box-shadow: 0 4px 20px rgba(200, 210, 230, 0.25); /* 부드러운 그림자 */
         margin-bottom: 20px;
-        transition: transform 0.2s;
+        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
     }
     div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-        border-color: #dee2e6;
         transform: translateY(-2px);
+        box-shadow: 0 8px 25px rgba(200, 210, 230, 0.4);
+        border-color: #007aff;
     }
 
-    /* Badges */
+    /* 3. Badges (Pill Shape) */
     .badge {
-        display: inline-flex; align-items: center; justify-content: center;
-        padding: 4px 10px; border-radius: 99px; font-size: 0.75rem; 
-        font-weight: 700; margin-right: 5px; margin-bottom: 8px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4px 10px;
+        border-radius: 99px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        margin-right: 6px;
+        margin-bottom: 8px;
+        letter-spacing: -0.3px;
     }
     .badge-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
     .badge-red { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
     .badge-gray { background-color: #f5f5f5; color: #616161; border: 1px solid #eeeeee; }
     
-    /* Typography */
-    .q-header { font-size: 1.1rem; font-weight: 800; color: #1a1a1a; margin: 8px 0; }
-    .q-body { 
-        font-size: 0.95rem; color: #495057; line-height: 1.7; 
-        background-color: #fafafa; padding: 15px; border-radius: 10px; 
-        border: 1px solid #f1f3f5; white-space: pre-wrap; 
+    /* 4. Question Typography */
+    .q-header {
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: #1a1a1a;
+        margin-top: 4px;
+        margin-bottom: 12px;
+        line-height: 1.4;
     }
-    .dashed-line { border-top: 2px dashed #e0e0e0; margin: 15px 0; width: 100%; height: 0; }
+    .q-body {
+        font-size: 0.95rem;
+        color: #495057;
+        line-height: 1.7;
+        background-color: #fafafa; /* 아주 연한 회색 박스 */
+        padding: 16px;
+        border-radius: 10px;
+        border: 1px solid #f1f3f5;
+        white-space: pre-wrap;
+    }
+
+    /* 5. Separator (Dashed) */
+    .dashed-line {
+        border-top: 2px dashed #e0e0e0;
+        margin: 20px 0;
+        width: 100%;
+        height: 0;
+    }
+
+    /* 6. Expander Styling */
+    .streamlit-expanderHeader {
+        font-size: 0.85rem;
+        font-weight: 600;
+        color: #555;
+        background-color: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 8px 12px;
+    }
+    .streamlit-expanderHeader:hover {
+        color: #007aff;
+        border-color: #007aff;
+        background-color: #f8f9fa;
+    }
+    div[data-testid="stExpander"] {
+        border: none;
+        box-shadow: none;
+    }
+    div[data-testid="stExpanderDetails"] {
+        padding: 12px;
+        border: 1px solid #eee;
+        border-radius: 8px;
+        margin-top: 8px;
+        background-color: #fafafa;
+    }
+
+    /* 7. Buttons */
+    div.stButton > button {
+        border-radius: 10px;
+        font-weight: 600;
+        border: none;
+        height: 2.8rem;
+        transition: 0.2s;
+        box-shadow: none;
+        background-color: #f1f3f5;
+    }
+    div.stButton > button:hover {
+        background-color: #e9ecef;
+        transform: scale(1.01);
+    }
+    div.stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #007aff 0%, #0062cc 100%);
+        box-shadow: 0 4px 12px rgba(0,122,255,0.25);
+        color: white;
+    }
+    div.stButton > button[kind="primary"] p { color: white !important; }
 
     /* Login Animation */
     .login-logo { font-size: 5rem; animation: bounce 2s infinite; display: inline-block; margin-bottom: 20px; }
     @keyframes bounce { 0%, 100% {transform: translateY(0);} 50% {transform: translateY(-15px);} }
 
-    /* Custom Button */
-    div.stButton > button[kind="primary"] {
-        background: linear-gradient(135deg, #007aff 0%, #0062cc 100%);
-        border: none; box-shadow: 0 4px 12px rgba(0,122,255,0.2);
-        transition: 0.2s;
-    }
-    div.stButton > button[kind="primary"]:hover { transform: scale(1.02); }
-    
     /* Layout */
     .block-container { padding-top: 2rem; max-width: 1200px; }
     header { visibility: hidden; }
@@ -90,7 +162,6 @@ st.markdown("""
 # ------------------------------------------------------------------------------
 # 2. 세션 상태 초기화 (State Management)
 # ------------------------------------------------------------------------------
-# 기본 상태 변수들
 state_defaults = {
     "logged_in": False, "db": [], "api_key": None, "api_key_ok": False,
     "text_models": [], "embedding_models": [], "best_text_model": None, "best_embedding_model": None,
@@ -99,7 +170,6 @@ state_defaults = {
     "transcribed_text": "", "chat_history": [],
     "last_page_sig": None, "last_ai_sig": None, "last_ai_data": None, "last_related": [],
     "tr_res": None,
-    # [NEW] 분석 캐시 (페이지별 분석 결과 저장)
     "analysis_cache": {} 
 }
 
@@ -133,30 +203,54 @@ def get_best_model(models, keywords):
         if found: return found[0]
     return models[0]
 
+# [Text Segmentation] 문항별 분리 함수 (핵심 기능)
+def split_text_into_questions(text):
+    """
+    텍스트에서 '1.', '2.' 등의 패턴을 찾아 문항별로 분리합니다.
+    """
+    if not text: return []
+    
+    # 정규식: 줄바꿈 혹은 시작 부분의 숫자+점/괄호 (예: 1. 2. 1) 2) )
+    # (?:\n|^) : 줄바꿈이나 문장 시작
+    # \s* : 공백 허용
+    # (\d+[\.\)]) : 숫자 뒤에 점이나 괄호 캡쳐
+    pattern = r'(?:\n|^)\s*(\d+[\.\)])\s+'
+    
+    parts = re.split(pattern, text)
+    
+    questions = []
+    # parts[0]은 첫 문제 전의 서론일 수 있음. parts[1]은 번호, parts[2]는 내용...
+    if len(parts) < 2:
+        return [text.strip()] # 분리 실패시 통째로 반환
+        
+    current_q = parts[0].strip()
+    if current_q: questions.append(current_q) # 서론이 있다면 추가
+    
+    for i in range(1, len(parts), 2):
+        num = parts[i]
+        content = parts[i+1] if i+1 < len(parts) else ""
+        full_q = f"{num} {content.strip()}"
+        questions.append(full_q)
+        
+    return questions
+
 # [Text Beautifier] - 족보 가독성 향상
 def clean_jokbo_text(text):
     if not text: return ""
-    
-    # 1. 문항 번호 앞에 줄바꿈 추가 (1. 2. 3. 등)
-    # 문장 시작이거나 줄바꿈 뒤에 숫자가 나오면 두 줄 띄움
+    # 1. 문항 번호 강조
     text = re.sub(r'(\n|^)(\d+)\.', r'\n\n**\2.**', text)
-    
-    # 2. 보기 가독성 개선 (①, (1), 1) 등이 나오면 줄바꿈)
-    # 앞뒤 공백을 고려하여 줄바꿈 처리
+    # 2. 보기 가독성 (①, (1) 등 줄바꿈)
     text = re.sub(r'(\s)(①|②|③|④|⑤|❶|❷|❸|❹|❺|\(1\)|\(2\)|\(3\)|\(4\)|\(5\)|1\)|2\)|3\)|4\)|5\))', r'\n\2', text)
-    
-    # 3. 연속된 줄바꿈 정리
+    # 3. 불필요한 줄바꿈 제거
     text = re.sub(r'\n{3,}', '\n\n', text)
-    
-    # 4. 페이지 번호 등 불필요한 숫자만 있는 줄 제거
+    # 4. 페이지 번호 제거
     text = re.sub(r'(?m)^\d+\s*$', '', text) 
-    
     return text.strip()
 
 # [Robust Embedding]
-def get_embedding_robust(text: str, status_placeholder=None):
+def get_embedding_robust(text: str):
     text = (text or "").strip()
-    if len(text) < 50: return None, "text_too_short"
+    if len(text) < 10: return None, "text_too_short" # 너무 짧으면 스킵
     ensure_configured()
     
     if not st.session_state.embedding_models:
@@ -166,6 +260,7 @@ def get_embedding_robust(text: str, status_placeholder=None):
     candidates = st.session_state.embedding_models
     if not candidates: return None, "No models"
     
+    # 최신 모델 우선
     sorted_candidates = sorted(candidates, key=lambda x: 0 if 'text-embedding-004' in x else 1)
     
     for model_name in sorted_candidates[:2]:
@@ -201,58 +296,41 @@ def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 10):
     top_idxs = np.argsort(sims)[::-1][:top_k]
     return [{"score": float(sims[i]), "content": valid_items[i]} for i in top_idxs]
 
-# [Improved AI JSON Generator with Retry]
+# [AI JSON Generator with Retry]
 def generate_json_response_robust(prompt: str):
-    """
-    AI 응답에서 JSON을 확실하게 추출하는 함수. (재시도 로직 포함)
-    """
     ensure_configured()
     target_model = st.session_state.best_text_model or "gemini-1.5-flash"
     
     text_result = None
-    
-    # Retry logic for generation
     for attempt in range(3):
         try:
-            # 1. JSON 모드로 요청
             config = genai.GenerationConfig(temperature=0.3, response_mime_type="application/json")
             model = genai.GenerativeModel(target_model, generation_config=config)
             res = model.generate_content(prompt)
             text_result = res.text
             break
         except Exception as e:
-            if "429" in str(e):
-                time.sleep(2 * (attempt + 1))
-                continue
-            # 2. 실패시 일반 텍스트 모드로 재요청
-            try:
+            if "429" in str(e): time.sleep(2 * (attempt + 1)); continue
+            try: # Text mode fallback
                 model = genai.GenerativeModel(target_model)
                 res = model.generate_content(prompt)
                 text_result = res.text
                 break
-            except:
-                pass
+            except: pass
     
     if not text_result:
-        return {"explanation": "AI 연결 실패 (잠시 후 다시 시도해주세요)", "direction": "분석 불가", "twin_question": "생성 불가"}
+        return {"explanation": "AI 연결 실패", "direction": "분석 불가", "twin_question": "생성 불가"}
 
-    # 3. 텍스트 정제 (마크다운 제거)
     text_result = re.sub(r"```json\s*", "", text_result)
     text_result = re.sub(r"```\s*$", "", text_result)
     text_result = text_result.strip()
 
-    # 4. JSON 파싱 시도
     try:
         match = re.search(r'\{.*\}', text_result, re.DOTALL)
-        if match:
-            text_result = match.group(0)
+        if match: text_result = match.group(0)
         return json.loads(text_result)
     except json.JSONDecodeError:
-        return {
-            "explanation": text_result, 
-            "direction": "JSON 파싱 실패 (내용은 '정답/해설'에서 확인하세요)", 
-            "twin_question": "형식 오류"
-        }
+        return {"explanation": text_result, "direction": "파싱 오류", "twin_question": "오류"}
 
 def generate_text_response(prompt: str):
     ensure_configured()
@@ -263,11 +341,9 @@ def generate_text_response(prompt: str):
             res = model.generate_content(prompt)
             return res.text
         except Exception as e:
-            if "429" in str(e): 
-                time.sleep(2 * (attempt + 1))
-                continue
+            if "429" in str(e): time.sleep(2 * (attempt + 1)); continue
             return f"Error: {e}"
-    return "AI 응답 실패 (사용량 초과)"
+    return "AI 응답 실패"
 
 def transcribe_image_to_text(image, api_key):
     try:
@@ -393,19 +469,19 @@ with st.sidebar:
                         st.session_state.embedding_models = e_mods
                         st.session_state.best_text_model = get_best_model(t_mods, ["flash", "pro"])
                         st.session_state.best_embedding_model = get_best_model(e_mods, ["text-embedding-004", "004"])
-                        st.success(f"연결 성공! ({st.session_state.best_text_model})")
+                        st.success(f"✅ 연결 성공! ({st.session_state.best_text_model})")
                     else: st.error("모델을 찾을 수 없습니다.")
     
     st.markdown("### 📊 DB 현황")
     with st.container(border=True):
-        st.metric("총 학습 페이지", len(st.session_state.db))
+        st.metric("총 학습 문항", len(st.session_state.db))
         if st.button("DB 초기화"): st.session_state.db = []; st.session_state.analysis_cache = {}; st.rerun()
 
 st.title("Med-Study OS")
 tab1, tab2, tab3 = st.tabs(["📂 족보 관리", "📖 강의 분석", "🎙️ 강의 녹음/분석"])
 
 # ------------------------------------------------------------------------------
-# TAB 1: 족보 관리 (학습)
+# TAB 1: 족보 관리 (학습 - 문항별 분리 적용)
 # ------------------------------------------------------------------------------
 with tab1:
     if st.session_state.subject_detail_view:
@@ -421,7 +497,7 @@ with tab1:
                 c1, c2 = st.columns([5, 1])
                 c1.markdown(f"**📄 {fname}**")
                 c1.markdown(f"<span class='badge badge-blue'>{meta}</span>", unsafe_allow_html=True)
-                c2.caption(f"{count} pages")
+                c2.caption(f"{count} items")
     else:
         col_upload, col_list = st.columns([1, 2])
         with col_upload:
@@ -448,7 +524,9 @@ with tab1:
                                 doc = fitz.open(stream=f.getvalue(), filetype="pdf")
                                 for p_idx, page in enumerate(doc):
                                     text = page.get_text().strip()
-                                    if len(text) < 50: # OCR 시도
+                                    
+                                    # OCR Fallback
+                                    if len(text) < 50:
                                         try:
                                             pix = page.get_pixmap()
                                             img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -456,18 +534,32 @@ with tab1:
                                             if ocr_text: text = ocr_text; log(f"✨ P.{p_idx+1} OCR 완료")
                                         except: pass
                                     
-                                    text = clean_jokbo_text(text)
-                                    emb, err = get_embedding_robust(text)
-                                    if emb:
-                                        new_db.append({"page": p_idx+1, "text": text, "source": f.name, "embedding": emb, "subject": final_subj})
-                                    elif err != "text_too_short": log(f"❌ P.{p_idx+1} 실패")
+                                    # [NEW] 문항별 분리 로직 적용
+                                    questions = split_text_into_questions(text)
+                                    
+                                    for q_idx, q_text in enumerate(questions):
+                                        q_text = clean_jokbo_text(q_text)
+                                        if len(q_text) < 10: continue # 너무 짧은 조각은 패스
+                                        
+                                        emb, err = get_embedding_robust(q_text)
+                                        if emb:
+                                            new_db.append({
+                                                "page": p_idx+1,
+                                                "q_num": q_idx+1,
+                                                "text": q_text,
+                                                "source": f.name,
+                                                "embedding": emb,
+                                                "subject": final_subj
+                                            })
+                                    
+                                    if not questions: log(f"❌ P.{p_idx+1} 텍스트 없음")
                                 log(f"✅ {f.name} 완료")
-                            except Exception as e: log(f"Err: {e}")
+                            except Exception as e: log(f"Error: {e}")
                             bar.progress((i+1)/len(files))
                         
                         if new_db:
                             st.session_state.db.extend(new_db)
-                            st.success("학습 완료!"); time.sleep(1); st.rerun()
+                            st.success(f"{len(new_db)}개 문항 학습 완료!"); time.sleep(1); st.rerun()
                         else: st.warning("데이터 없음")
 
         with col_list:
@@ -483,7 +575,7 @@ with tab1:
                             with st.container(border=True):
                                 c1, c2 = st.columns([4, 1])
                                 if c1.button(f"## {s}", key=f"v_{s}"): st.session_state.subject_detail_view = s; st.rerun()
-                                st.markdown(f"**{stats[s]['count']}** pages")
+                                st.markdown(f"**{stats[s]['count']}** items")
 
 # ------------------------------------------------------------------------------
 # TAB 2: 강의 분석 (미리 분석 + 카드 UI)
@@ -509,9 +601,8 @@ with tab2:
                 st.session_state.lecture_doc = fitz.open(stream=l_file.getvalue(), filetype="pdf")
                 st.session_state.lecture_filename = l_file.name
                 st.session_state.current_page = 0
-                st.session_state.analysis_cache = {} # 파일 바뀌면 캐시 초기화
+                st.session_state.analysis_cache = {} 
                 
-            # [NEW] 전체 페이지 미리 분석 버튼 (Batch Processing)
             if st.session_state.lecture_doc:
                 if st.button("🚀 전체 페이지 미리 분석하기 (속도 향상)", use_container_width=True):
                     if not st.session_state.api_key_ok: st.error("API Key 필요")
@@ -525,14 +616,12 @@ with tab2:
                             try:
                                 page = doc.load_page(idx)
                                 txt = page.get_text().strip()
-                                # 텍스트 없으면 OCR
                                 if len(txt) < 50:
                                     pix = page.get_pixmap()
                                     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                                     ocr = transcribe_image_to_text(img, st.session_state.api_key)
                                     if ocr: txt = ocr
                                 
-                                # 분석 수행 및 캐싱
                                 if txt:
                                     rel = find_relevant_jokbo(txt, sub_db, top_k=10)
                                     ai_res = None
@@ -541,19 +630,16 @@ with tab2:
                                         ai_res = generate_json_response_robust(prmt)
                                     
                                     st.session_state.analysis_cache[idx] = {
-                                        "text": txt,
-                                        "related": rel,
-                                        "ai_data": ai_res
+                                        "text": txt, "related": rel, "ai_data": ai_res
                                     }
                             except: pass
                             bar.progress((idx + 1) / total)
-                        st.success("분석 완료! 이제 페이지를 넘겨보세요.")
+                        st.success("분석 완료!")
 
         if st.session_state.lecture_doc:
             doc = st.session_state.lecture_doc
             c_view, c_ai = st.columns([1.5, 1.2])
             
-            # [Left] 뷰어
             with c_view:
                 with st.container(border=True):
                     c1, c2, c3 = st.columns([1, 2, 1])
@@ -565,7 +651,6 @@ with tab2:
                     pix = page.get_pixmap(dpi=150)
                     st.image(Image.frombytes("RGB", [pix.width, pix.height], pix.samples), use_container_width=True)
 
-            # [Right] 분석 결과 (캐시 우선 사용)
             with c_ai:
                 ai_tab1, ai_tab2 = st.tabs(["📝 족보 매칭", "💬 질의응답"])
                 with ai_tab1:
@@ -576,17 +661,14 @@ with tab2:
                     rel = []
                     res_ai = {}
                     
-                    # 1. 캐시가 있으면 즉시 로드
                     if cache_data:
                         p_text = cache_data["text"]
                         rel = cache_data["related"]
                         res_ai = cache_data["ai_data"] or {}
-                    
-                    # 2. 캐시가 없으면 실시간 분석 (On-demand)
                     else:
                         page = doc.load_page(cur_idx)
                         p_text = page.get_text().strip()
-                        if len(p_text) < 50: # Viewer OCR
+                        if len(p_text) < 50:
                             try:
                                 pix = page.get_pixmap()
                                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -602,20 +684,17 @@ with tab2:
                                     prmt = build_page_analysis_prompt_json(p_text, rel, target_subj)
                                     res_ai = generate_json_response_robust(prmt)
                     
-                    # 3. 결과 표시
-                    if not p_text:
-                        st.info("텍스트를 인식할 수 없습니다.")
-                    elif not has_jokbo_evidence(rel):
-                        st.info("관련 기출 문제가 없습니다.")
+                    if not p_text: st.info("텍스트를 인식할 수 없습니다.")
+                    elif not has_jokbo_evidence(rel): st.info("관련 기출 문제가 없습니다.")
                     else:
                         high_rel_count = len([r for r in rel if r['score'] > 0.82])
                         
-                        # 카드 렌더링
+                        # 상위 2개 카드 렌더링
                         for i, r in enumerate(rel[:2]):
                             score = r['score']
                             src = r['content'].get('source', 'Unknown')
                             txt = r['content'].get('text', '')
-                            txt_clean = clean_jokbo_text(txt)[:400]
+                            txt_clean = clean_jokbo_text(txt)[:400] # 미리보기 길이 제한
                             meta = parse_metadata_from_filename(src)
                             
                             freq_html = ""
@@ -626,7 +705,7 @@ with tab2:
                             
                             with st.container(border=True):
                                 st.markdown(f"<div><span class='badge badge-blue'>기출</span>{freq_html}<span class='badge badge-gray'>{meta}</span></div>", unsafe_allow_html=True)
-                                st.markdown(f"<div class='q-header'>Q. (자동 추출 문항)</div>", unsafe_allow_html=True)
+                                st.markdown(f"<div class='q-header'>Q. (관련 문항)</div>", unsafe_allow_html=True)
                                 st.markdown(f"<div class='q-body'>{txt_clean}...</div>", unsafe_allow_html=True)
                                 st.markdown("<div class='dashed-line'></div>", unsafe_allow_html=True)
                                 
@@ -644,8 +723,9 @@ with tab2:
                                         if i == 0: st.info(res_ai.get("twin_question", "분석 중..."))
                                         else: st.caption("내용 없음")
                                 
+                                # [CHANGED] 전체 족보 보기
                                 with st.expander("🔍 전체 족보 보기"):
-                                    st.text(clean_jokbo_text(txt))
+                                    st.text(clean_jokbo_text(txt)) # 전체 텍스트 표시
 
                 with ai_tab2:
                     for msg in st.session_state.chat_history:
@@ -662,7 +742,7 @@ with tab2:
                                     st.session_state.chat_history.append({"role":"assistant", "content":ans})
 
 # ------------------------------------------------------------------------------
-# TAB 3: 녹음 분석
+# TAB 3: 녹음 분석 (완전한 기능 복구)
 # ------------------------------------------------------------------------------
 with tab3:
     with st.container(border=True):
