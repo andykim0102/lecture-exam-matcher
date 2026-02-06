@@ -124,6 +124,15 @@ st.markdown("""
     
     /* 12. Hot Page Button */
     .hot-page-btn-score { font-size: 0.8em; color: #ff3b30; }
+
+    /* 13. Answer Box */
+    .answer-box {
+        background-color: #e8f5e9;
+        border-left: 4px solid #4caf50;
+        padding: 10px;
+        margin-top: 10px;
+        border-radius: 4px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -792,8 +801,8 @@ with tab2:
                                                     sims = cosine_similarity([emb], db_embs)[0]
                                                     max_score = max(sims)
                                                     
-                                                    # Threshold for "Hot Page"
-                                                    if max_score >= 0.60:
+                                                    # Threshold for "Hot Page" (INCREASED to 0.75 for better accuracy)
+                                                    if max_score >= 0.75:
                                                         results.append({"page": p_idx, "score": max_score})
                                         except Exception:
                                             pass
@@ -801,8 +810,9 @@ with tab2:
                                         # Update progress
                                         prog_bar.progress((p_idx+1)/total_pages)
                                     
-                                    # 3. Store Results
-                                    st.session_state.hot_pages = sorted(results, key=lambda x: x["score"], reverse=True)
+                                    # 3. Store Results (Limit to Top 20)
+                                    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
+                                    st.session_state.hot_pages = sorted_results[:20]
                                     st.session_state.hot_pages_analyzed = True
                                     st.rerun()
                 else:
@@ -810,7 +820,7 @@ with tab2:
                     c_head, c_reset = st.columns([4, 1])
                     with c_head:
                         if not st.session_state.hot_pages:
-                            st.info("매칭되는 적중 페이지를 찾지 못했습니다. (임계값 0.6 미만)")
+                            st.info("매칭되는 적중 페이지를 찾지 못했습니다. (임계값 0.75 미만)")
                         else:
                             st.markdown(f"**🔥 총 {len(st.session_state.hot_pages)}개의 적중 페이지 발견!** (클릭하여 이동)")
                     with c_reset:
@@ -930,42 +940,42 @@ with tab2:
                                             </div>
                                             """, unsafe_allow_html=True)
 
-                                            # Interactive Parse & Twin Gen for THIS question
-                                            with st.expander(f"✨ 이 문항으로 쌍둥이 문제 만들기", expanded=False):
-                                                # (A) Parsing Step
-                                                if item_id not in st.session_state.parsed_items:
-                                                    if st.button("구조 분석 및 파싱", key=f"btn_p_{item_id}"):
-                                                        with st.spinner("AI가 족보 텍스트를 구조화 중..."):
-                                                            parsed = parse_raw_jokbo_llm(question_txt)
-                                                            st.session_state.parsed_items[item_id] = parsed
-                                                            st.rerun()
-                                                
-                                                # Show Parsed Result
-                                                parsed_res = st.session_state.parsed_items.get(item_id)
-                                                if parsed_res:
+                                            # [NEW] Single Button for Analysis & Generation
+                                            with st.expander(f"✨ 정답/해설 및 쌍둥이 문제", expanded=False):
+                                                # Check if already parsed/generated
+                                                if item_id in st.session_state.parsed_items:
+                                                    # Show Cached Results
+                                                    parsed_res = st.session_state.parsed_items[item_id]
                                                     if parsed_res["success"]:
                                                         data = parsed_res["data"]
-                                                        st.caption("✅ 파싱 성공")
-                                                        st.markdown(f"**Q:** {data.get('question')}")
-                                                        st.markdown(f"**A:** {data.get('answer')}")
+                                                        st.markdown(f"""
+                                                        <div class="answer-box">
+                                                            <strong>✅ 정답:</strong> {data.get('answer', '정보 없음')}<br><br>
+                                                            <strong>💡 해설:</strong> {data.get('explanation', '정보 없음')}
+                                                        </div>
+                                                        """, unsafe_allow_html=True)
                                                         
-                                                        # (B) Generation Step
-                                                        if item_id not in st.session_state.twin_items:
-                                                            if st.button("변형 문제 생성", key=f"btn_g_{item_id}", type="primary"):
-                                                                with st.spinner("변형 문제 생성 중..."):
-                                                                    twin_res = generate_twin_problem_llm(parsed_res, st.session_state.t2_selected_subject)
-                                                                    st.session_state.twin_items[item_id] = twin_res
-                                                                    st.rerun()
-                                                        
-                                                        # Show Generated Result
-                                                        twin_res = st.session_state.twin_items.get(item_id)
-                                                        if twin_res:
+                                                        # Show Twin Problem
+                                                        if item_id in st.session_state.twin_items:
                                                             st.divider()
-                                                            st.markdown(twin_res)
+                                                            st.markdown(st.session_state.twin_items[item_id])
                                                     else:
-                                                        st.error("파싱 실패: 텍스트가 너무 불완전합니다.")
+                                                        st.error("분석 실패")
                                                 else:
-                                                    st.caption("먼저 '구조 분석'을 눌러주세요.")
+                                                    # One Button to Trigger All
+                                                    if st.button("🚀 AI 정답/해설 및 변형 문제 생성", key=f"btn_all_{item_id}", type="primary", use_container_width=True):
+                                                        with st.spinner("AI가 문제를 분석하고 변형 문제를 생성 중입니다..."):
+                                                            # 1. Parse
+                                                            parsed = parse_raw_jokbo_llm(question_txt)
+                                                            st.session_state.parsed_items[item_id] = parsed
+                                                            
+                                                            # 2. Generate Twin (if parse success)
+                                                            if parsed["success"]:
+                                                                twin_res = generate_twin_problem_llm(parsed, st.session_state.t2_selected_subject)
+                                                                st.session_state.twin_items[item_id] = twin_res
+                                                                st.rerun()
+                                                            else:
+                                                                st.error("텍스트 분석에 실패했습니다.")
                         else:
                             st.info("분석할 텍스트가 없습니다.")
 
