@@ -1,3 +1,4 @@
+# app.py (Optimized + Handwriting)
 # app.py (Optimized - No Canvas)
 import time
 import re
@@ -9,6 +10,12 @@ from sklearn.metrics.pairwise import cosine_similarity
 import streamlit as st
 import google.generativeai as genai
 from google.api_core import retry  # For robust API calls
+
+# Try importing st_canvas, handle if missing
+try:
+    from streamlit_drawable_canvas import st_canvas
+except ImportError:
+    st_canvas = None
 
 # ==========================================
 # 0. Page config & Custom CSS
@@ -35,8 +42,10 @@ st.markdown("""
    .block-container { 
        padding-top: 1rem !important; 
        padding-bottom: 2rem !important; 
-       padding-left: 1rem !important; 
-       padding-right: 1rem !important; 
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        padding-left: 1rem !important; 
+        padding-right: 1rem !important; 
        max-width: 100% !important;
    }
    header[data-testid="stHeader"] { display: none; }
@@ -87,67 +96,22 @@ st.markdown("""
    .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
    div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
    
-    /* 10. Jokbo Items */
-    .jokbo-item {
-        background-color: #fffde7;
-        border: 1px solid #fff59d;
-        border-radius: 12px;
-        padding: 16px;
-    /* 10. Jokbo Card Style (NEW) */
-    .jokbo-card {
-        background-color: #ffffff;
-        border: 1px solid #e5e5ea;
-        border-radius: 16px;
-        padding: 20px;
-        margin-bottom: 15px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.03);
-        transition: all 0.2s ease;
-    }
-    .jokbo-card:hover {
-        box-shadow: 0 8px 16px rgba(0,0,0,0.06);
-        transform: translateY(-2px);
-    }
-    .jokbo-header {
-        display: flex;
-        gap: 8px;
+   /* 10. Jokbo Items */
+   .jokbo-item {
+       background-color: #fffde7;
+       border: 1px solid #fff59d;
+       border-radius: 12px;
+       padding: 16px;
        margin-bottom: 12px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.02);
-        align-items: center;
+       box-shadow: 0 2px 6px rgba(0,0,0,0.02);
    }
-    .jokbo-source {
-        font-size: 0.8rem;
-        color: #f57f17;
-        margin-bottom: 6px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    .tag-year {
-        background-color: #e3f2fd;
-        color: #1565c0;
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-    }
-    .tag-freq {
-        background-color: #ffebee;
-        color: #c62828;
-        padding: 4px 10px;
-        border-radius: 6px;
-        font-size: 0.75rem;
-        font-weight: 700;
-        letter-spacing: -0.5px;
-    }
-    .jokbo-content {
-        font-size: 1rem;
-        line-height: 1.6;
-        color: #1c1c1e;
-        font-weight: 500;
-    }
-    .jokbo-divider {
-        margin: 15px 0;
-        border-bottom: 1px dashed #e0e0e0;
+   .jokbo-source {
+       font-size: 0.8rem;
+       color: #f57f17;
+       margin-bottom: 6px;
+       font-weight: 800;
+       text-transform: uppercase;
+       letter-spacing: 0.5px;
    }
    
    /* 11. Sidebar Items */
@@ -165,6 +129,17 @@ st.markdown("""
        gap: 8px;
    }
    .sidebar-icon { font-size: 1.1rem; }
+    
+    /* 12. Canvas Toolbar */
+    .canvas-toolbar {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 10px;
+        padding: 10px;
+        background: #f1f3f5;
+        border-radius: 10px;
+        align-items: center;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -227,6 +202,10 @@ st.session_state.last_ai_text = ""
 if "last_related" not in st.session_state:
 st.session_state.last_related = []
 
+# --- Handwriting State ---
+if "drawings" not in st.session_state:
+    st.session_state.drawings = {}  # {(filename, page_idx): json_data}
+
 
 # ==========================================
 # 2. Login Logic
@@ -268,16 +247,8 @@ st.rerun()
 # ==========================================
 def format_jokbo_text(text):
 if not text: return ""
-    # Add newlines for options (e.g. 1., 2.)
 formatted = re.sub(r'(?<!\d)(\d+\.)\s+', r'\n\n**\1** ', text)
-    # Highlight "Q."
-    formatted = re.sub(r'(Q\.|문\d+\.)', r'**\1**', formatted)
 return formatted.strip()
-
-def extract_year_from_source(source_name):
-    # Regex to find 4 digits starting with 20 (e.g., 2021, 2024)
-    match = re.search(r'20\d{2}', source_name)
-    return match.group(0) if match else None
 
 def rename_subject(old_name, new_name):
 count = 0
@@ -652,6 +623,7 @@ st.markdown("---")
 st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
 st.markdown(f"<span class='gray-text'>🕒 {subj_data['last_updated']}</span>", unsafe_allow_html=True)
 
+# --- TAB 2: 강의 분석 (Handwriting Canvas) ---
 # --- TAB 2: 강의 분석 (No Canvas) ---
 with tab2:
 if st.session_state.t2_selected_subject is None:
@@ -685,13 +657,15 @@ st.session_state.lecture_filename = l_file.name
 st.session_state.current_page = 0
 st.session_state.last_page_sig = None
 st.session_state.chat_history = [] 
+                    st.session_state.drawings = {} # Clear drawings on new file
 
 if st.session_state.lecture_doc:
 doc = st.session_state.lecture_doc
 
 col_view, col_ai = st.columns([1.8, 1.2])
 
-# --- Left: Viewer (Standard Image) ---
+            # --- Left: Viewer (Canvas with Handwriting) ---
+            # --- Left: Viewer (Standard Image) ---
 with col_view:
 with st.container(border=True):
 # Nav Toolbar
@@ -711,13 +685,49 @@ st.session_state.current_page += 1
 st.session_state.chat_history = []
 st.rerun()
 
-# Prepare Image
+                    # Prepare Image & Canvas
+                    # Prepare Image
 page = doc.load_page(st.session_state.current_page)
 pix = page.get_pixmap(dpi=150)
 pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
 p_text = page.get_text() or ""
 
-st.image(pil_image, use_container_width=True)
+                    # --- Handwriting Controls ---
+                    st.markdown("**✏️ 필기 도구**")
+                    t_c1, t_c2, t_c3 = st.columns([2, 2, 1])
+                    with t_c1:
+                        mode = st.radio("도구", ["펜 (그리기)", "선택/이동 (지우기)"], horizontal=True, label_visibility="collapsed")
+                        drawing_mode = "freedraw" if "펜" in mode else "transform"
+                    with t_c2:
+                        stroke_width = st.slider("굵기", 1, 20, 3, label_visibility="collapsed")
+                    with t_c3:
+                        stroke_color = st.color_picker("색상", "#FF0000", label_visibility="collapsed")
+
+                    # Load existing drawing
+                    page_key = f"{st.session_state.lecture_filename}_{st.session_state.current_page}"
+                    initial_drawing = st.session_state.drawings.get(page_key)
+
+                    if st_canvas:
+                        canvas_result = st_canvas(
+                            fill_color="rgba(255, 165, 0, 0.3)",
+                            stroke_width=stroke_width,
+                            stroke_color=stroke_color,
+                            background_image=pil_image,
+                            update_streamlit=True,
+                            height=pil_image.height,
+                            width=pil_image.width,
+                            drawing_mode=drawing_mode,
+                            initial_drawing=initial_drawing,
+                            key=f"canvas_{page_key}"
+                        )
+                        
+                        # Save state
+                        if canvas_result.json_data is not None:
+                             st.session_state.drawings[page_key] = canvas_result.json_data
+                    else:
+                        st.image(pil_image, use_container_width=True)
+                        st.warning("Canvas 라이브러리가 설치되지 않았습니다. `pip install streamlit-drawable-canvas`를 실행하세요.")
+                    st.image(pil_image, use_container_width=True)
 
 # --- Right: AI Assistant (Clean Version) ---
 with col_ai:
@@ -759,43 +769,12 @@ score = r['score']
 src = r['content'].get('source', 'Unknown')
 txt = r['content'].get('text', '')[:300]
 formatted_txt = format_jokbo_text(txt)
-                                        st.markdown(f"""
-                                        <div class="jokbo-item">
-                                            <div class="jokbo-source">출처: {src} (유사도 {score:.2f})</div>
-                                            {formatted_txt}...
-                                        
-                                        # Extract Year
-                                        year = extract_year_from_source(src)
-                                        year_tag = f"{year}년 기출" if year else "기출"
-                                        
-                                        # Fake frequency logic for demo (replace with real logic if DB permits)
-                                        # Assuming high similarity = frequent appearance concept
-                                        freq_tag = ""
-                                        if score > 0.82:
-                                            # Deterministic fake count for demo consistency
-                                            f_count = (hash(txt[:10]) % 3) + 2
-                                            freq_tag = f"🔥 {f_count}회 출제"
-                                        
-                                        # New Card UI
-                                        html_content = f"""
-                                        <div class="jokbo-card">
-                                            <div class="jokbo-header">
-                                                <span class="tag-year">{year_tag}</span>
-                                                {"<span class='tag-freq'>" + freq_tag + "</span>" if freq_tag else ""}
-                                            </div>
-                                            <div class="jokbo-content">
-                                                {formatted_txt}...
-                                            </div>
-                                            <div class="jokbo-divider"></div>
+st.markdown(f"""
+                                       <div class="jokbo-item">
+                                           <div class="jokbo-source">출처: {src} (유사도 {score:.2f})</div>
+                                           {formatted_txt}...
                                        </div>
-                                        """, unsafe_allow_html=True)
-                                        """
-                                        st.markdown(html_content, unsafe_allow_html=True)
-                                        
-                                        # Action Buttons (Expanders styled to sit below/inside card logically)
-                                        # Note: Placing st.expander inside HTML div isn't possible, so we place them below.
-                                        # To make it look integrated, we used a divider in HTML and removed top margin of expanders via CSS or just place them here.
-                                        # Since we want a "Clean" look, standard expanders are fine.
+                                       """, unsafe_allow_html=True)
 
 aisig = (psig, target_subj)
 if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
@@ -815,19 +794,12 @@ st.session_state.last_ai_sig = aisig
 
 res_dict = st.session_state.last_ai_text
 if isinstance(res_dict, dict):
-                                        with st.expander("🧭 공부 방향성 보기", expanded=True):
-                                        # Custom container for actions to match the card width
-                                        # We can't put them inside the card div easily, but we can group them.
-                                        with st.expander("📝 정답 및 해설", expanded=False):
-                                            st.markdown(res_dict.get("EXPLANATION", "생성 중..."))
-                                        with st.expander("🎯 출제 포인트"):
+with st.expander("🧭 공부 방향성 보기", expanded=True):
 st.markdown(res_dict.get("DIRECTION", "분석 중..."))
-                                        with st.expander("🧩 쌍둥이 문제 만들기"):
-                                        with st.expander("🔄 쌍둥이 문제"):
+with st.expander("🧩 쌍둥이 문제 만들기"):
 st.markdown(res_dict.get("TWIN_Q", "생성 중..."))
-                                        with st.expander("✅ 해설 및 정답"):
-                                            st.markdown(res_dict.get("EXPLANATION", "생성 중..."))
-                                            
+with st.expander("✅ 해설 및 정답"):
+st.markdown(res_dict.get("EXPLANATION", "생성 중..."))
 else:
 st.write(res_dict)
 else:
