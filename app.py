@@ -1,4 +1,4 @@
-# app.py (UI: Photo-Like Card Style / Logic: Smart Metadata & Frequency)
+# app.py (UI: Photo-Like Card Style / Logic: Full Features Restored)
 import time
 import re
 import random
@@ -30,10 +30,12 @@ st.markdown("""
         font-weight: 700;
         margin-right: 6px;
         display: inline-block;
+        white-space: nowrap;
     }
     .badge-blue { background-color: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
     .badge-red { background-color: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
     .badge-gray { background-color: #f5f5f5; color: #616161; border: 1px solid #e0e0e0; }
+    .badge-green { background-color: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
     
     /* 3. Question Text Styles */
     .q-title {
@@ -51,6 +53,7 @@ st.markdown("""
         border-radius: 8px;
         line-height: 1.6;
         white-space: pre-wrap;
+        border: 1px solid #f0f0f0;
     }
     
     /* 4. Dashed Divider */
@@ -69,7 +72,7 @@ st.markdown("""
     .block-container { padding-top: 1.5rem !important; }
     header[data-testid="stHeader"] { display: none; }
     
-    /* 7. Expander Styling Override (Cleaner look) */
+    /* 7. Expander Styling Override */
     .streamlit-expanderHeader {
         font-size: 0.9rem;
         font-weight: 600;
@@ -91,7 +94,8 @@ defaults = {
     "lecture_doc": None, "lecture_filename": None, "current_page": 0,
     "edit_target_subject": None, "subject_detail_view": None, "t2_selected_subject": None,
     "transcribed_text": "", "chat_history": [],
-    "last_page_sig": None, "last_ai_sig": None, "last_ai_text": "", "last_related": []
+    "last_page_sig": None, "last_ai_sig": None, "last_ai_text": "", "last_related": [],
+    "tr_res": None # [Restored] Transcript Result Cache
 }
 
 for k, v in defaults.items():
@@ -254,7 +258,7 @@ def transcribe_audio_gemini(audio_bytes, api_key):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content([
-            "Please transcribe the following audio file into text accurately.",
+            "Please transcribe the following audio file into text accurately. Do not add any conversational text, just the transcription.",
             {"mime_type": "audio/wav", "data": audio_bytes}
         ])
         return response.text
@@ -267,18 +271,16 @@ def parse_metadata_from_filename(filename):
     year = ""
     exam_type = ""
     
-    # 연도 추출 (20xx)
     year_match = re.search(r'(20\d{2})', filename)
     if year_match: year = year_match.group(1)
     
-    # 시험 종류
     if "중간" in filename: exam_type = "중간"
     elif "기말" in filename: exam_type = "기말"
     elif "모의" in filename: exam_type = "모의"
     elif "국시" in filename: exam_type = "국시"
     
     full_meta = f"{year} {exam_type}".strip()
-    return full_meta if full_meta else "출처미상"
+    return full_meta if full_meta else "기출"
 
 # --- Prompts ---
 def build_overview_prompt(first_page_text, subject):
@@ -306,11 +308,37 @@ def build_chat_prompt(history, context_text, related_jokbo, question):
     jokbo_ctx = "\n".join([f"- {r['content']['text'][:300]}" for r in related_jokbo[:3]])
     return f"질문: {question}\n강의내용: {context_text[:1000]}\n족보: {jokbo_ctx}\n답변해주세요."
 
+# [Restored] Transcript Prompt
 def build_transcript_prompt(chunks, related_packs, subject):
-    return f"강의 녹음 내용을 족보와 연결하여 요약해주세요. 과목: {subject}"
+    packed = ""
+    for idx, (chunk, rel) in enumerate(zip(chunks, related_packs), 1):
+        if not has_jokbo_evidence(rel): continue
+        ctx = "\n".join([f"- {r['content']['text'][:200]}" for r in rel[:2]])
+        packed += f"\n(구간 {idx})\n[강의] {chunk}\n[족보근거] {ctx}\n"
+    
+    if not packed: return "족보와 관련된 특별한 내용은 발견되지 않았습니다. 일반적인 요약입니다."
+    
+    return f"""
+    당신은 의대 조교입니다. 강의 전사 내용을 족보 기반으로 분석하여 요약하세요.
+    과목: {subject}
+    
+    {packed}
+    
+    출력 형식:
+    [족보 적중 노트]
+    1. 핵심 주제 (관련 족보 연계)
+    2. 교수님이 강조한 내용
+    """
 
-def chunk_transcript(text):
-    return [text[i:i+900] for i in range(0, len(text), 900)]
+def chunk_transcript(text: str, max_chars: int = 900):
+    parts = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+    chunks = []
+    for p in parts:
+        if len(p) <= max_chars: chunks.append(p)
+        else:
+            for i in range(0, len(p), max_chars):
+                chunks.append(p[i:i+max_chars])
+    return chunks
 
 def extract_text_from_pdf(uploaded_file):
     try:
@@ -566,7 +594,6 @@ with tab2:
                         rel = st.session_state.last_related
                         
                         if has_jokbo_evidence(rel):
-                            # AI Analysis first if needed
                             if st.session_state.api_key_ok:
                                 aisig = (psig, target_subj)
                                 if aisig != st.session_state.last_ai_sig:
@@ -584,63 +611,39 @@ with tab2:
                             
                             res_ai = st.session_state.last_ai_text
                             
-                            # Render Cards (Top 2)
                             high_rel_count = len([r for r in rel if r['score'] > 0.82])
                             
                             for i, r in enumerate(rel[:2]):
                                 score = r['score']
                                 src = r['content'].get('source', 'Unknown')
                                 txt = r['content'].get('text', '')[:250]
-                                
                                 meta = parse_metadata_from_filename(src)
                                 
-                                # Frequency Badge Logic
                                 freq_html = ""
                                 if i == 0 and high_rel_count >= 2:
                                     freq_html = f"<span class='badge-base badge-red'>★ 중요 ({high_rel_count}회 출제)</span>"
                                 elif score > 0.88:
                                     freq_html = "<span class='badge-base badge-red'>★ 매우 유사</span>"
                                 
-                                # 1. Card Container (White Box)
                                 with st.container(border=True):
-                                    # 2. Badge Header
-                                    st.markdown(f"""
-                                    <div>
-                                        <span class='badge-base badge-blue'>기출</span>
-                                        {freq_html}
-                                        <span class='badge-base badge-gray'>{meta}</span>
-                                    </div>
-                                    """, unsafe_allow_html=True)
-                                    
-                                    # 3. Question Title & Body
+                                    st.markdown(f"<div><span class='badge-base badge-blue'>기출</span>{freq_html}<span class='badge-base badge-gray'>{meta}</span></div>", unsafe_allow_html=True)
                                     st.markdown(f"<div class='q-title'>Q. 다음 중... (자동요약)</div>", unsafe_allow_html=True)
                                     st.markdown(f"<div class='q-body'>{txt}...</div>", unsafe_allow_html=True)
-                                    
-                                    # 4. Dashed Line
                                     st.markdown("<div class='dashed-line'></div>", unsafe_allow_html=True)
                                     
-                                    # 5. Functional Buttons (Simulated with Expanders for clean look)
                                     c1, c2, c3 = st.columns(3)
                                     with c1:
                                         with st.expander("📝 정답/해설"):
-                                            # Use AI generated explanation for the first card
-                                            if i == 0 and isinstance(res_ai, dict):
-                                                st.write(res_ai.get("EXPLANATION", "생성 중..."))
-                                            else:
-                                                st.caption("AI 해설은 가장 유사한 문제에만 제공됩니다.")
+                                            if i == 0 and isinstance(res_ai, dict): st.write(res_ai.get("EXPLANATION", "생성 중..."))
+                                            else: st.caption("AI 해설 미제공")
                                     with c2:
                                         with st.expander("🎯 출제포인트"):
-                                            if i == 0 and isinstance(res_ai, dict):
-                                                st.write(res_ai.get("DIRECTION", "생성 중..."))
-                                            else:
-                                                st.caption("내용 없음")
+                                            if i == 0 and isinstance(res_ai, dict): st.write(res_ai.get("DIRECTION", "생성 중..."))
+                                            else: st.caption("내용 없음")
                                     with c3:
                                         with st.expander("🔄 쌍둥이문제"):
-                                            if i == 0 and isinstance(res_ai, dict):
-                                                st.info(res_ai.get("TWIN_Q", "생성 중..."))
-                                            else:
-                                                st.caption("내용 없음")
-
+                                            if i == 0 and isinstance(res_ai, dict): st.info(res_ai.get("TWIN_Q", "생성 중..."))
+                                            else: st.caption("내용 없음")
                         else:
                             st.info("관련 기출 문제가 없습니다.")
 
@@ -658,11 +661,57 @@ with tab2:
                                     st.markdown(ans)
                                     st.session_state.chat_history.append({"role":"assistant", "content":ans})
 
-# --- TAB 3: 녹음 (Logic Only) ---
+# --- TAB 3: 강의 녹음/분석 (Restored) ---
 with tab3:
-    st.info("강의 녹음 기능은 Tab 2와 동일한 AI 엔진을 사용합니다.")
-    audio = st.audio_input("녹음")
-    if audio and st.button("분석"):
-        if st.session_state.api_key_ok:
-            txt = transcribe_audio_gemini(audio.getvalue(), st.session_state.api_key)
-            if txt: st.success("변환 완료"); st.write(txt)
+    with st.container(border=True):
+        st.markdown("#### 🎙️ 강의 녹음/분석")
+        c_in, c_out = st.columns(2)
+        
+        with c_in:
+            sub_t3 = st.selectbox("과목", ["전체"] + sorted({x.get("subject", "") for x in st.session_state.db}), key="t3_s")
+            t3_mode = st.radio("입력 방식", ["🎤 직접 녹음", "📂 파일 업로드 / 텍스트"], horizontal=True, label_visibility="collapsed")
+            target_text = ""
+            
+            if t3_mode == "🎤 직접 녹음":
+                audio_value = st.audio_input("녹음 시작")
+                if audio_value and st.button("분석 실행", type="primary", key="btn_mic"):
+                    if not st.session_state.api_key_ok: st.error("API Key 필요")
+                    else:
+                        with st.spinner("음성을 텍스트로 변환 중..."):
+                            transcript = transcribe_audio_gemini(audio_value.getvalue(), st.session_state.api_key)
+                            if transcript:
+                                st.session_state.transcribed_text = transcript
+                                target_text = transcript
+            else:
+                f_txt = st.file_uploader("전사 파일(.txt)", type="txt", key="t3_f")
+                area_txt = st.text_area("직접 입력", height=150, placeholder="강의 내용을 붙여넣으세요...")
+                if st.button("분석 실행", type="primary", key="btn_txt"):
+                    target_text = (f_txt.getvalue().decode() if f_txt else area_txt).strip()
+            
+            if target_text:
+                if not st.session_state.api_key_ok: st.error("API Key 필요")
+                else:
+                    with st.spinner("족보 매칭 및 분석 중..."):
+                        sdb = filter_db_by_subject(sub_t3, st.session_state.db)
+                        # Chunking & Retrieval
+                        chunks = chunk_transcript(target_text)[:10] # Limit to 10 chunks for speed
+                        rels = [find_relevant_jokbo(c, sdb, top_k=3) for c in chunks]
+                        
+                        # Generate RAG Summary
+                        pmt = build_transcript_prompt(chunks, rels, sub_t3)
+                        res, _ = generate_with_fallback(pmt, st.session_state.text_models)
+                        st.session_state.tr_res = res
+                    st.success("분석 완료!")
+
+        with c_out:
+            st.caption("분석 결과")
+            if "tr_res" in st.session_state and st.session_state.tr_res:
+                with st.container(border=True):
+                    st.markdown("##### 📝 족보 기반 요약 노트")
+                    st.info(st.session_state.tr_res)
+                
+                if st.session_state.transcribed_text:
+                    with st.expander("🗣️ 변환된 전체 스크립트 보기"):
+                        st.text(st.session_state.transcribed_text)
+            else:
+                st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">왼쪽에서 녹음 또는 텍스트를 입력하세요.</div>""", unsafe_allow_html=True)
