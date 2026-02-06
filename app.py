@@ -848,11 +848,18 @@ with tab2:
                                                 if "error" in parsed_res:
                                                     st.error("구조화 실패. 텍스트가 너무 손상되었습니다.")
                                                 else:
-                                                    st.success("✅ 구조화 성공!")
-                                                    st.json(parsed_res, expanded=False)
+                                                    st.success("✅ 자동 파싱 성공!")
+                                                    # JSON 대신 가독성 좋은 마크다운 표시
+                                                    q_text = parsed_res.get("question", "")
+                                                    a_text = parsed_res.get("answer", "")
+                                                    
+                                                    st.markdown(f"**질문:** {q_text}")
+                                                    st.markdown(f"**정답:** {a_text}")
+                                                    
+                                                    st.divider()
                                                     
                                                     # 2. Generation Step
-                                                    if st.button("2단계: 변형 문제 생성", key=f"btn_gen_{idx}"):
+                                                    if st.button("✨ 변형 문제 생성하기", key=f"btn_gen_{idx}", type="primary"):
                                                         with st.spinner("쌍둥이 문제 생성 중..."):
                                                             twin_q = generate_twin_problem_from_parsed(parsed_res)
                                                             st.markdown("---")
