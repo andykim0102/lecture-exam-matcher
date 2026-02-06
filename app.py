@@ -2,7 +2,7 @@
 # ==============================================================================
 #  Med-Study OS: 의대생을 위한 스마트 학습 어시스턴트
 #  기능: 족보 PDF 분석, 실시간 강의 매칭, 음성 녹음 요약, AI 질의응답
-#  업데이트: 미리 분석(Batch Processing) 기능 추가, AI JSON 파싱 강화
+#  업데이트: AI 재시도 로직 강화, 족보 텍스트 가독성 포매터 개선, UI 수정
 # ==============================================================================
 
 import time
@@ -133,13 +133,24 @@ def get_best_model(models, keywords):
         if found: return found[0]
     return models[0]
 
-# [Text Beautifier]
+# [Text Beautifier] - 족보 가독성 향상
 def clean_jokbo_text(text):
     if not text: return ""
+    
+    # 1. 문항 번호 앞에 줄바꿈 추가 (1. 2. 3. 등)
+    # 문장 시작이거나 줄바꿈 뒤에 숫자가 나오면 두 줄 띄움
+    text = re.sub(r'(\n|^)(\d+)\.', r'\n\n**\2.**', text)
+    
+    # 2. 보기 가독성 개선 (①, (1), 1) 등이 나오면 줄바꿈)
+    # 앞뒤 공백을 고려하여 줄바꿈 처리
+    text = re.sub(r'(\s)(①|②|③|④|⑤|❶|❷|❸|❹|❺|\(1\)|\(2\)|\(3\)|\(4\)|\(5\)|1\)|2\)|3\)|4\)|5\))', r'\n\2', text)
+    
+    # 3. 연속된 줄바꿈 정리
     text = re.sub(r'\n{3,}', '\n\n', text)
-    text = re.sub(r'(?m)^(\d+)\.', r'**\1.**', text)
-    text = re.sub(r'(?<!\n)(①|②|③|④|⑤|❶|❷|❸|❹|❺|\(1\)|\(2\)|\(3\)|\(4\)|\(5\))', r'\n\1', text)
-    text = re.sub(r'(?m)^\d+\s*$', '', text) # 페이지 번호 제거
+    
+    # 4. 페이지 번호 등 불필요한 숫자만 있는 줄 제거
+    text = re.sub(r'(?m)^\d+\s*$', '', text) 
+    
     return text.strip()
 
 # [Robust Embedding]
@@ -190,46 +201,55 @@ def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 10):
     top_idxs = np.argsort(sims)[::-1][:top_k]
     return [{"score": float(sims[i]), "content": valid_items[i]} for i in top_idxs]
 
-# [Improved AI JSON Generator]
+# [Improved AI JSON Generator with Retry]
 def generate_json_response_robust(prompt: str):
     """
-    AI 응답에서 JSON을 확실하게 추출하는 함수.
-    마크다운 코드 블록(```json ... ```)을 제거하고 파싱합니다.
+    AI 응답에서 JSON을 확실하게 추출하는 함수. (재시도 로직 포함)
     """
     ensure_configured()
     target_model = st.session_state.best_text_model or "gemini-1.5-flash"
     
-    try:
-        # 1. JSON 모드로 요청
-        config = genai.GenerationConfig(temperature=0.3, response_mime_type="application/json")
-        model = genai.GenerativeModel(target_model, generation_config=config)
-        res = model.generate_content(prompt)
-        text = res.text
-    except:
-        # 2. 실패시 일반 텍스트 모드로 재요청
+    text_result = None
+    
+    # Retry logic for generation
+    for attempt in range(3):
         try:
-            model = genai.GenerativeModel(target_model)
+            # 1. JSON 모드로 요청
+            config = genai.GenerationConfig(temperature=0.3, response_mime_type="application/json")
+            model = genai.GenerativeModel(target_model, generation_config=config)
             res = model.generate_content(prompt)
-            text = res.text
+            text_result = res.text
+            break
         except Exception as e:
-            return {"explanation": f"AI 오류: {str(e)}", "direction": "분석 불가", "twin_question": "생성 불가"}
+            if "429" in str(e):
+                time.sleep(2 * (attempt + 1))
+                continue
+            # 2. 실패시 일반 텍스트 모드로 재요청
+            try:
+                model = genai.GenerativeModel(target_model)
+                res = model.generate_content(prompt)
+                text_result = res.text
+                break
+            except:
+                pass
+    
+    if not text_result:
+        return {"explanation": "AI 연결 실패 (잠시 후 다시 시도해주세요)", "direction": "분석 불가", "twin_question": "생성 불가"}
 
     # 3. 텍스트 정제 (마크다운 제거)
-    text = re.sub(r"```json\s*", "", text)
-    text = re.sub(r"```\s*$", "", text)
-    text = text.strip()
+    text_result = re.sub(r"```json\s*", "", text_result)
+    text_result = re.sub(r"```\s*$", "", text_result)
+    text_result = text_result.strip()
 
     # 4. JSON 파싱 시도
     try:
-        # 중괄호 사이의 내용만 추출 시도 (가장 바깥쪽 중괄호)
-        match = re.search(r'\{.*\}', text, re.DOTALL)
+        match = re.search(r'\{.*\}', text_result, re.DOTALL)
         if match:
-            text = match.group(0)
-        return json.loads(text)
+            text_result = match.group(0)
+        return json.loads(text_result)
     except json.JSONDecodeError:
-        # 파싱 실패시 원본 텍스트라도 보여줌
         return {
-            "explanation": text, 
+            "explanation": text_result, 
             "direction": "JSON 파싱 실패 (내용은 '정답/해설'에서 확인하세요)", 
             "twin_question": "형식 오류"
         }
@@ -237,11 +257,17 @@ def generate_json_response_robust(prompt: str):
 def generate_text_response(prompt: str):
     ensure_configured()
     target_model = st.session_state.best_text_model or "gemini-1.5-flash"
-    try:
-        model = genai.GenerativeModel(target_model)
-        res = model.generate_content(prompt)
-        return res.text
-    except Exception as e: return f"Error: {e}"
+    for attempt in range(3):
+        try:
+            model = genai.GenerativeModel(target_model)
+            res = model.generate_content(prompt)
+            return res.text
+        except Exception as e:
+            if "429" in str(e): 
+                time.sleep(2 * (attempt + 1))
+                continue
+            return f"Error: {e}"
+    return "AI 응답 실패 (사용량 초과)"
 
 def transcribe_image_to_text(image, api_key):
     try:
@@ -618,7 +644,7 @@ with tab2:
                                         if i == 0: st.info(res_ai.get("twin_question", "분석 중..."))
                                         else: st.caption("내용 없음")
                                 
-                                with st.expander("🔍 전체 지문 보기"):
+                                with st.expander("🔍 전체 족보 보기"):
                                     st.text(clean_jokbo_text(txt))
 
                 with ai_tab2:
