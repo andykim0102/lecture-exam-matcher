@@ -1,4 +1,4 @@
-# app.py (Optimized - No Canvas)
+# app.py (Optimized - No Canvas + Stability Fix)
 import time
 import re
 import random
@@ -273,14 +273,18 @@ def pick_best_text_model(model_names: list[str]):
     return flash[0] if flash else model_names[0]
 
 def extract_text_from_pdf(uploaded_file):
-    data = uploaded_file.getvalue()
-    doc = fitz.open(stream=data, filetype="pdf")
-    pages = []
-    for i, page in enumerate(doc):
-        text = page.get_text() or ""
-        if text.strip():
-            pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
-    return pages
+    try:
+        data = uploaded_file.getvalue()
+        doc = fitz.open(stream=data, filetype="pdf")
+        pages = []
+        for i, page in enumerate(doc):
+            text = page.get_text() or ""
+            # Only keep pages with content
+            if len(text.strip()) > 50:
+                pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
+        return pages
+    except:
+        return []
 
 @retry.Retry(predicate=retry.if_exception_type(Exception)) 
 def get_embedding_with_retry(text, model="models/text-embedding-004"):
@@ -542,15 +546,31 @@ with tab1:
                         
                         for i, f in enumerate(files):
                             status_text.text(f"처리 중: {f.name}...")
-                            pgs = extract_text_from_pdf(f)
                             
-                            # 페이지별 임베딩 처리
-                            for p_idx, p in enumerate(pgs):
-                                emb = get_embedding(p["text"])
-                                if emb:
-                                    p["embedding"] = emb
-                                    p["subject"] = final_subj
-                                    new_db.append(p)
+                            try:
+                                pgs = extract_text_from_pdf(f)
+                                total_pages = len(pgs)
+                                
+                                # 페이지별 임베딩 처리
+                                for p_idx, p in enumerate(pgs):
+                                    # 상세 진행 상황 표시 (사용자 안심용)
+                                    status_text.text(f"⏳ {f.name} 처리 중... ({p_idx + 1}/{total_pages} 페이지)")
+                                    
+                                    try:
+                                        emb = get_embedding(p["text"])
+                                        if emb:
+                                            p["embedding"] = emb
+                                            p["subject"] = final_subj
+                                            new_db.append(p)
+                                    except Exception:
+                                        # 개별 페이지 에러 무시
+                                        pass
+                                    
+                                    # [중요] API 속도 제한 방지 딜레이
+                                    time.sleep(1.0)
+                                    
+                            except Exception as e:
+                                st.error(f"{f.name} 처리 중 오류: {e}")
                                 
                             prog_bar.progress((i + 1) / total_files)
                             
