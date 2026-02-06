@@ -815,13 +815,30 @@ with tab2:
                                             # [FIXED] Smart Model List
                                             raw_res, _ = generate_with_fallback(prmt, st.session_state.text_models)
                                             
-                                            parts = raw_res.split("[SECTION:")
-                                            parsed = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
-                                            for p in parts:
-                                                if "DIRECTION]" in p: parsed["DIRECTION"] = p.replace("DIRECTION]", "").strip()
-                                                elif "TWIN_Q]" in p: parsed["TWIN_Q"] = p.replace("TWIN_Q]", "").strip()
-                                                elif "EXPLANATION]" in p: parsed["EXPLANATION"] = p.replace("EXPLANATION]", "").strip()
+                                            # [IMPROVED] Robust Parsing with Regex (빈칸 문제 해결)
+                                            # 1. 마크다운 코드 블록 제거 등 전처리
+                                            clean_res = re.sub(r"```.*?", "", raw_res).replace("```", "").strip()
                                             
+                                            # 2. 정규식으로 유연하게 섹션 추출 ([SECTION: KEY] ... )
+                                            pattern = r"\[SECTION:\s*(\w+)\s*\](.*?)(?=\[SECTION:|$)"
+                                            matches = re.findall(pattern, clean_res, re.DOTALL)
+                                            
+                                            parsed = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
+                                            
+                                            if matches:
+                                                for key, content in matches:
+                                                    u_key = key.upper().strip()
+                                                    if u_key in parsed:
+                                                        parsed[u_key] = content.strip()
+                                            else:
+                                                # 파싱 실패 시 원본이라도 보여주기 위한 처리
+                                                parsed["DIRECTION"] = raw_res
+                                                parsed["TWIN_Q"] = "(자동 파싱 실패 - 상단 내용을 참고하세요)"
+                                            
+                                            # 3. 모든 값이 비어있을 경우(매칭 실패) 안전장치
+                                            if not any(v.strip() for v in parsed.values()):
+                                                parsed["DIRECTION"] = raw_res
+
                                             st.session_state.last_ai_text = parsed
                                             st.session_state.last_ai_sig = aisig
                                     
