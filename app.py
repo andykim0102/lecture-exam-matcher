@@ -313,14 +313,19 @@ def pick_best_text_model(model_names: list[str]):
     return flash[0] if flash else model_names[0]
 
 def extract_text_from_pdf(uploaded_file):
-    data = uploaded_file.getvalue()
-    doc = fitz.open(stream=data, filetype="pdf")
-    pages = []
-    for i, page in enumerate(doc):
-        text = page.get_text() or ""
-        if text.strip():
-            pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
-    return pages
+    try:
+        data = uploaded_file.getvalue()
+        doc = fitz.open(stream=data, filetype="pdf")
+        pages = []
+        for i, page in enumerate(doc):
+            text = page.get_text() or ""
+            # Only keep pages with reasonable amount of text to save API calls
+            if len(text.strip()) > 50: 
+                pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
+        return pages
+    except Exception as e:
+        st.error(f"PDF 처리 중 오류: {e}")
+        return []
 
 @retry.Retry(predicate=retry.if_exception_type(Exception)) 
 def get_embedding_with_retry(text, model="models/text-embedding-004"):
@@ -576,30 +581,50 @@ with tab1:
                     elif not files: st.warning("파일을 선택해주세요.")
                     else:
                         prog_bar = st.progress(0)
-                        status_text = st.empty()
+                        status_text = st.empty() # Placeholder for status messages
                         new_db = []
                         total_files = len(files)
                         
-                        for i, f in enumerate(files):
-                            status_text.text(f"처리 중: {f.name}...")
-                            pgs = extract_text_from_pdf(f)
-                            
-                            # 페이지별 임베딩 처리
-                            for p_idx, p in enumerate(pgs):
-                                emb = get_embedding(p["text"])
-                                if emb:
-                                    p["embedding"] = emb
-                                    p["subject"] = final_subj
-                                    new_db.append(p)
+                        try:
+                            for i, f in enumerate(files):
+                                status_text.text(f"📂 파일 분석 중: {f.name}...")
+                                pgs = extract_text_from_pdf(f)
                                 
-                            prog_bar.progress((i + 1) / total_files)
+                                if not pgs:
+                                    st.warning(f"⚠️ {f.name}에서 텍스트를 추출할 수 없습니다. (스캔된 이미지일 수 있음)")
+                                    continue
+                                
+                                total_pages = len(pgs)
+                                for p_idx, p in enumerate(pgs):
+                                    # Update Status Text with details
+                                    status_text.text(f"⏳ {f.name} 처리 중... ({p_idx + 1}/{total_pages} 페이지 임베딩 생성)")
+                                    
+                                    emb = get_embedding(p["text"])
+                                    if emb:
+                                        p["embedding"] = emb
+                                        p["subject"] = final_subj
+                                        new_db.append(p)
+                                    else:
+                                        # Log but don't stop
+                                        print(f"Embedding failed for {f.name} page {p_idx+1}")
+                                    
+                                    # Rate limiting precaution
+                                    time.sleep(0.5)
+                                
+                                prog_bar.progress((i + 1) / total_files)
                             
-                        st.session_state.db.extend(new_db)
-                        status_text.text("학습 완료!")
-                        st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
-                        time.sleep(1)
-                        st.rerun()
-                        
+                            if new_db:
+                                st.session_state.db.extend(new_db)
+                                status_text.success(f"✅ 학습 완료! 총 {len(new_db)} 페이지가 추가되었습니다.")
+                                st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
+                                time.sleep(1.5)
+                                st.rerun()
+                            else:
+                                status_text.error("❌ 처리된 데이터가 없습니다. PDF가 텍스트를 포함하고 있는지 확인해주세요.")
+                                
+                        except Exception as e:
+                            status_text.error(f"❌ 처리 중 오류 발생: {str(e)}")
+
         with col_list:
             st.markdown("#### 📚 내 학습 데이터")
             stats = get_subject_stats()
