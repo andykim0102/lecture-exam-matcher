@@ -1,4 +1,4 @@
-# app.py (UI: Modern Card & Tabs / Logic: Full List Display + Separated Analysis)
+# app.py (UI: Modern Card & Tabs / Logic: Auto-Analyze Top Items + "View More" for others)
 import time
 import re
 import random
@@ -88,7 +88,7 @@ st.markdown("""
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 10. Exam Card Style (New) */
+    /* 10. Exam Card Style */
     .exam-card {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
@@ -635,8 +635,17 @@ with tab2:
                     else:
                         st.success(f"🔥 **{len(rel)}개의 관련 족보 문항이 발견되었습니다.**")
                         
-                        # Loop through items
-                        for i, r in enumerate(rel): # ALL items
+                        # ==========================================
+                        # NEW DISPLAY LOGIC (Top 2 + View More)
+                        # ==========================================
+                        
+                        # 1. Separate Top 2 (High Relevance) and Others
+                        # Assuming 'rel' is sorted by find_relevant_jokbo
+                        top_rel = rel[:2]
+                        other_rel = rel[2:]
+
+                        # --- Part A: Top 2 Items (Auto Analyze) ---
+                        for i, r in enumerate(top_rel): 
                             content = r['content']
                             score = r['score']
                             raw_txt = content['text']
@@ -651,7 +660,7 @@ with tab2:
                                 st.markdown(f"""
                                 <div class="exam-card">
                                     <div class="exam-meta">
-                                        <span><span class="exam-score-badge">{score:.0%} 일치</span> &nbsp; {content['source']} (P.{content['page']})</span>
+                                        <span><span class="exam-score-badge">TOP {i+1}</span> {score:.0%} 일치 &nbsp;|&nbsp; {content['source']} (P.{content['page']})</span>
                                     </div>
                                     <div class="exam-question">
                                         {q_txt[:400] + ('...' if len(q_txt)>400 else '')}
@@ -659,26 +668,22 @@ with tab2:
                                 </div>
                                 """, unsafe_allow_html=True)
 
-                                # AUTO-ANALYSIS LOGIC
-                                is_top_match = (i == 0 and q_idx == 0)
-                                if is_top_match and score > 0.70:
-                                    if item_id not in st.session_state.parsed_items:
-                                        with st.spinner("🤖 AI가 자동으로 정답을 분석하고 변형 문제를 생성하고 있습니다..."):
-                                            parsed = parse_raw_jokbo_llm(q_txt)
-                                            st.session_state.parsed_items[item_id] = parsed
-                                            if parsed["success"]:
-                                                twin = generate_twin_problem_llm(parsed, target_subj)
-                                                st.session_state.twin_items[item_id] = twin
-                                            st.rerun()
+                                # AUTO-ANALYSIS LOGIC (ALWAYS RUN FOR TOP ITEMS)
+                                if item_id not in st.session_state.parsed_items:
+                                    with st.spinner("🤖 AI가 자동으로 분석 중입니다..."):
+                                        parsed = parse_raw_jokbo_llm(q_txt)
+                                        st.session_state.parsed_items[item_id] = parsed
+                                        if parsed["success"]:
+                                            twin = generate_twin_problem_llm(parsed, target_subj)
+                                            st.session_state.twin_items[item_id] = twin
+                                        st.rerun()
 
-                                # Render Analysis Result (Separated Tabs)
+                                # Render Analysis Result (Tabs)
                                 if item_id in st.session_state.parsed_items:
                                     parsed = st.session_state.parsed_items[item_id]
                                     if parsed["success"]:
                                         d = parsed["data"]
-                                        
                                         tab_ans, tab_twin = st.tabs(["✅ 정답 및 해설", "🧩 변형 문제"])
-                                        
                                         with tab_ans:
                                             st.markdown(f"""
                                             <div class="answer-box">
@@ -686,21 +691,50 @@ with tab2:
                                                 <strong>💡 해설:</strong> {d.get('explanation','N/A')}
                                             </div>
                                             """, unsafe_allow_html=True)
-                                        
                                         with tab_twin:
                                             st.markdown(st.session_state.twin_items.get(item_id, "생성 실패"))
                                     else:
                                         st.error("분석 실패")
-                                else:
-                                    # For non-top items, manual button
-                                    if st.button("AI 분석 실행", key=f"btn_{item_id}"):
-                                        with st.spinner("분석 중..."):
-                                            p = parse_raw_jokbo_llm(q_txt)
-                                            st.session_state.parsed_items[item_id] = p
-                                            if p["success"]:
-                                                t = generate_twin_problem_llm(p, target_subj)
-                                                st.session_state.twin_items[item_id] = t
-                                            st.rerun()
+                        
+                        # --- Part B: View More (Manual Analyze) ---
+                        if other_rel:
+                            with st.expander(f"📚 관련 족보 더보기 ({len(other_rel)}개 문항)"):
+                                for i, r in enumerate(other_rel):
+                                    # Adjust index offset for IDs
+                                    real_idx = i + 2
+                                    content = r['content']
+                                    score = r['score']
+                                    raw_txt = content['text']
+                                    
+                                    questions = split_jokbo_text(raw_txt)
+                                    if not questions: questions = [raw_txt]
+                                    
+                                    for q_idx, q_txt in enumerate(questions):
+                                        item_id = f"{psig}_{real_idx}_{q_idx}"
+                                        
+                                        st.markdown(f"""
+                                        <div style="padding:15px; background:#fff; border:1px solid #ddd; border-radius:10px; margin-bottom:10px;">
+                                            <small style="color:#888;">{score:.0%} 일치 | {content['source']} (P.{content['page']})</small>
+                                            <div style="font-weight:600; margin-top:5px;">{q_txt[:200]}...</div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+                                        
+                                        # Click to Analyze (Manual)
+                                        if st.button("🔍 분석 보기", key=f"btn_more_{item_id}"):
+                                            with st.spinner("분석 중..."):
+                                                parsed = parse_raw_jokbo_llm(q_txt)
+                                                st.session_state.parsed_items[item_id] = parsed
+                                                if parsed["success"]:
+                                                    twin = generate_twin_problem_llm(parsed, target_subj)
+                                                    st.session_state.twin_items[item_id] = twin
+                                                st.rerun()
+                                        
+                                        if item_id in st.session_state.parsed_items:
+                                            parsed = st.session_state.parsed_items[item_id]
+                                            if parsed["success"]:
+                                                d = parsed["data"]
+                                                st.markdown(f"**정답:** {d.get('answer')}")
+                                                st.caption(d.get('explanation'))
 
 # --- TAB 3: 녹음 (Existing) ---
 with tab3:
