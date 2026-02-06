@@ -87,24 +87,24 @@ st.markdown("""
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 10. Jokbo Card Style (NEW) */
+    /* 10. Jokbo Card Style (NEW - Clean Design) */
     .jokbo-card {
         background-color: #ffffff;
         border: 1px solid #e5e5ea;
         border-radius: 16px;
-        padding: 20px;
+        padding: 24px;
         margin-bottom: 15px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.03);
         transition: all 0.2s ease;
     }
     .jokbo-card:hover {
-        box-shadow: 0 8px 16px rgba(0,0,0,0.06);
+        box-shadow: 0 8px 24px rgba(0,0,0,0.06);
         transform: translateY(-2px);
     }
     .jokbo-header {
         display: flex;
         gap: 8px;
-        margin-bottom: 12px;
+        margin-bottom: 16px;
         align-items: center;
     }
     .tag-year {
@@ -112,27 +112,28 @@ st.markdown("""
         color: #1565c0;
         padding: 4px 10px;
         border-radius: 6px;
-        font-size: 0.75rem;
+        font-size: 0.8rem;
         font-weight: 700;
-        letter-spacing: -0.5px;
+        letter-spacing: -0.3px;
     }
     .tag-freq {
         background-color: #ffebee;
         color: #c62828;
         padding: 4px 10px;
         border-radius: 6px;
-        font-size: 0.75rem;
+        font-size: 0.8rem;
         font-weight: 700;
-        letter-spacing: -0.5px;
+        letter-spacing: -0.3px;
     }
     .jokbo-content {
-        font-size: 1rem;
+        font-size: 1.05rem;
         line-height: 1.6;
         color: #1c1c1e;
         font-weight: 500;
     }
     .jokbo-divider {
-        margin: 15px 0;
+        margin-top: 20px;
+        margin-bottom: 5px;
         border-bottom: 1px dashed #e0e0e0;
     }
     
@@ -261,7 +262,7 @@ def format_jokbo_text(text):
     return formatted.strip()
 
 def extract_year_from_source(source_name):
-    # Regex to find 4 digits starting with 20 (e.g., 2021, 2024)
+    """파일명에서 4자리 연도 추출 (예: 2023_해부학.pdf -> 2023)"""
     match = re.search(r'20\d{2}', source_name)
     return match.group(0) if match else None
 
@@ -798,7 +799,7 @@ with tab2:
                                     if isinstance(res_dict, dict):
                                         # Custom container for actions to match the card width
                                         # We can't put them inside the card div easily, but we can group them.
-                                        with st.expander("📝 정답 및 해설", expanded=False):
+                                        with st.expander("📑 정답 및 해설", expanded=False):
                                             st.markdown(res_dict.get("EXPLANATION", "생성 중..."))
                                         with st.expander("🎯 출제 포인트"):
                                             st.markdown(res_dict.get("DIRECTION", "분석 중..."))
