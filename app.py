@@ -1,4 +1,4 @@
-# app.py (UI: Clean & Auto / Logic: Auto-Analysis + Instant Twin Gen)
+# app.py (UI: Modern Card & Tabs / Logic: Full List Display + Separated Analysis)
 import time
 import re
 import random
@@ -88,24 +88,47 @@ st.markdown("""
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 10. Jokbo Items (Yellow Box Style) */
-    .jokbo-item {
-        background-color: #fffde7;
-        border: 1px solid #fff59d;
-        border-radius: 12px;
-        padding: 16px;
+    /* 10. Exam Card Style (New) */
+    .exam-card {
+        background-color: #ffffff;
+        border: 1px solid #e0e0e0;
+        border-radius: 16px;
+        padding: 24px;
+        margin-bottom: 20px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.04);
+        transition: transform 0.2s;
+    }
+    .exam-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.08);
+        border-color: #007aff;
+    }
+    .exam-meta {
+        font-size: 0.85rem;
+        color: #666;
         margin-bottom: 12px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid #f0f0f0;
+        padding-bottom: 8px;
     }
-    .jokbo-source {
+    .exam-score-badge {
+        background-color: #e3f2fd;
+        color: #1565c0;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-weight: 700;
         font-size: 0.8rem;
-        color: #f57f17;
-        margin-bottom: 6px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
     }
-    
+    .exam-question {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #333;
+        line-height: 1.6;
+        margin-bottom: 15px;
+    }
+
     /* 11. Sidebar Items */
     .sidebar-subject {
         padding: 10px 15px;
@@ -127,12 +150,12 @@ st.markdown("""
 
     /* 13. Answer Box */
     .answer-box {
-        background-color: #e8f5e9;
-        border-left: 4px solid #4caf50;
-        padding: 10px;
-        margin-top: 10px;
-        border-radius: 4px;
+        background-color: #f1f8e9;
+        border: 1px solid #c5e1a5;
+        padding: 16px;
+        border-radius: 8px;
         font-size: 0.95rem;
+        color: #33691e;
     }
     
     /* 14. Auto badge */
@@ -613,7 +636,7 @@ with tab2:
                         st.success(f"🔥 **{len(rel)}개의 관련 족보 문항이 발견되었습니다.**")
                         
                         # Loop through items
-                        for i, r in enumerate(rel[:2]): # Top 2 only
+                        for i, r in enumerate(rel): # ALL items
                             content = r['content']
                             score = r['score']
                             raw_txt = content['text']
@@ -625,51 +648,59 @@ with tab2:
                             for q_idx, q_txt in enumerate(questions):
                                 item_id = f"{psig}_{i}_{q_idx}"
                                 
-                                with st.container(border=True):
-                                    st.markdown(f"<span style='color:#f57f17; font-weight:bold;'>유사도 {score:.0%}</span> (출처: {content['source']})", unsafe_allow_html=True)
-                                    st.markdown(f"**Q.** {q_txt[:200]}..." if len(q_txt)>200 else f"**Q.** {q_txt}")
-                                    
-                                    # AUTO-ANALYSIS LOGIC
-                                    # If score is very high (>0.70) AND top item, automatically run analysis
-                                    is_top_match = (i == 0 and q_idx == 0)
-                                    if is_top_match and score > 0.70:
-                                        if item_id not in st.session_state.parsed_items:
-                                            with st.spinner("🤖 AI가 자동으로 정답을 분석하고 변형 문제를 생성하고 있습니다..."):
-                                                parsed = parse_raw_jokbo_llm(q_txt)
-                                                st.session_state.parsed_items[item_id] = parsed
-                                                if parsed["success"]:
-                                                    twin = generate_twin_problem_llm(parsed, target_subj)
-                                                    st.session_state.twin_items[item_id] = twin
-                                                # No rerun needed if we render below immediately, 
-                                                # but to be safe and update state cleanly:
-                                                st.rerun()
+                                st.markdown(f"""
+                                <div class="exam-card">
+                                    <div class="exam-meta">
+                                        <span><span class="exam-score-badge">{score:.0%} 일치</span> &nbsp; {content['source']} (P.{content['page']})</span>
+                                    </div>
+                                    <div class="exam-question">
+                                        {q_txt[:400] + ('...' if len(q_txt)>400 else '')}
+                                    </div>
+                                </div>
+                                """, unsafe_allow_html=True)
 
-                                    # Render Analysis Result
-                                    if item_id in st.session_state.parsed_items:
-                                        parsed = st.session_state.parsed_items[item_id]
-                                        if parsed["success"]:
-                                            d = parsed["data"]
+                                # AUTO-ANALYSIS LOGIC
+                                is_top_match = (i == 0 and q_idx == 0)
+                                if is_top_match and score > 0.70:
+                                    if item_id not in st.session_state.parsed_items:
+                                        with st.spinner("🤖 AI가 자동으로 정답을 분석하고 변형 문제를 생성하고 있습니다..."):
+                                            parsed = parse_raw_jokbo_llm(q_txt)
+                                            st.session_state.parsed_items[item_id] = parsed
+                                            if parsed["success"]:
+                                                twin = generate_twin_problem_llm(parsed, target_subj)
+                                                st.session_state.twin_items[item_id] = twin
+                                            st.rerun()
+
+                                # Render Analysis Result (Separated Tabs)
+                                if item_id in st.session_state.parsed_items:
+                                    parsed = st.session_state.parsed_items[item_id]
+                                    if parsed["success"]:
+                                        d = parsed["data"]
+                                        
+                                        tab_ans, tab_twin = st.tabs(["✅ 정답 및 해설", "🧩 변형 문제"])
+                                        
+                                        with tab_ans:
                                             st.markdown(f"""
                                             <div class="answer-box">
-                                                <strong>✅ 정답:</strong> {d.get('answer','N/A')}<br>
+                                                <strong>✅ 정답:</strong> {d.get('answer','N/A')}<br><br>
                                                 <strong>💡 해설:</strong> {d.get('explanation','N/A')}
                                             </div>
                                             """, unsafe_allow_html=True)
-                                            
-                                            with st.expander("🧩 변형(쌍둥이) 문제 보기", expanded=True):
-                                                st.markdown(st.session_state.twin_items.get(item_id, "생성 실패"))
-                                        else:
-                                            st.error("분석 실패")
+                                        
+                                        with tab_twin:
+                                            st.markdown(st.session_state.twin_items.get(item_id, "생성 실패"))
                                     else:
-                                        # For non-top items, manual button
-                                        if st.button("AI 분석 실행", key=f"btn_{item_id}"):
-                                            with st.spinner("분석 중..."):
-                                                p = parse_raw_jokbo_llm(q_txt)
-                                                st.session_state.parsed_items[item_id] = p
-                                                if p["success"]:
-                                                    t = generate_twin_problem_llm(p, target_subj)
-                                                    st.session_state.twin_items[item_id] = t
-                                                st.rerun()
+                                        st.error("분석 실패")
+                                else:
+                                    # For non-top items, manual button
+                                    if st.button("AI 분석 실행", key=f"btn_{item_id}"):
+                                        with st.spinner("분석 중..."):
+                                            p = parse_raw_jokbo_llm(q_txt)
+                                            st.session_state.parsed_items[item_id] = p
+                                            if p["success"]:
+                                                t = generate_twin_problem_llm(p, target_subj)
+                                                st.session_state.twin_items[item_id] = t
+                                            st.rerun()
 
 # --- TAB 3: 녹음 (Existing) ---
 with tab3:
