@@ -1,4 +1,4 @@
-# app.py (UI: Original Rich Style / Logic: Smart Model Discovery + OCR Fallback)
+# app.py (UI: Original Rich Style / Logic: Smart Model Discovery + Dynamic OCR)
 import time
 import re
 import random
@@ -327,18 +327,29 @@ def transcribe_audio_gemini(audio_bytes, api_key):
         st.error(f"음성 인식 실패: {e}")
         return None
 
-# [NEW] 이미지 텍스트 변환 (OCR Fallback)
-def transcribe_image_to_text(image, api_key):
+# [NEW] 이미지 텍스트 변환 (OCR Fallback) - Dynamic Model
+def transcribe_image_to_text(image, api_key, model_name=None):
     try:
         genai.configure(api_key=api_key)
-        # 이미지 인식은 Flash 모델이 가장 빠르고 효율적
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        # 사용 가능한 모델이 있으면 사용, 없으면 기본값 시도
+        target_model = model_name if model_name else "gemini-1.5-flash"
+        
+        model = genai.GenerativeModel(target_model)
         response = model.generate_content([
             "Extract all text from this image exactly as is. Just the text, no comments.",
             image
         ])
         return response.text
-    except Exception:
+    except Exception as e:
+        # st.warning(f"OCR 실패 ({target_model}): {e}") # 디버깅용
+        return None
+
+def extract_text_from_pdf(uploaded_file):
+    try:
+        data = uploaded_file.getvalue()
+        doc = fitz.open(stream=data, filetype="pdf")
+        return doc
+    except:
         return None
 
 # --- Prompt Builders (Original Rich Prompts Restored) ---
@@ -610,7 +621,14 @@ with tab1:
                                             try:
                                                 pix = page.get_pixmap()
                                                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                                                ocr_text = transcribe_image_to_text(img, st.session_state.api_key)
+                                                
+                                                # [FIXED] Dynamic Model for OCR
+                                                ocr_text = transcribe_image_to_text(
+                                                    img, 
+                                                    st.session_state.api_key, 
+                                                    st.session_state.best_text_model
+                                                )
+                                                
                                                 if ocr_text:
                                                     text = ocr_text
                                                     log(f"✨ P.{p_idx+1}: 이미지에서 텍스트 추출 성공!")
