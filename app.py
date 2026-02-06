@@ -1,4 +1,4 @@
-# app.py (Reverted to Yellow Box UI + Stability Fixes)
+# app.py (Reverted to Clean Optimized Version)
 import time
 import re
 import random
@@ -87,7 +87,7 @@ st.markdown("""
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 10. Jokbo Items (Restored Yellow Box Style) */
+    /* 10. Jokbo Items */
     .jokbo-item {
         background-color: #fffde7;
         border: 1px solid #fff59d;
@@ -223,10 +223,7 @@ def logout():
 # ==========================================
 def format_jokbo_text(text):
     if not text: return ""
-    # Add newlines for options (e.g. 1., 2.)
     formatted = re.sub(r'(?<!\d)(\d+\.)\s+', r'\n\n**\1** ', text)
-    # Highlight "Q."
-    formatted = re.sub(r'(Q\.|문\d+\.)', r'**\1**', formatted)
     return formatted.strip()
 
 def rename_subject(old_name, new_name):
@@ -276,19 +273,14 @@ def pick_best_text_model(model_names: list[str]):
     return flash[0] if flash else model_names[0]
 
 def extract_text_from_pdf(uploaded_file):
-    try:
-        data = uploaded_file.getvalue()
-        doc = fitz.open(stream=data, filetype="pdf")
-        pages = []
-        for i, page in enumerate(doc):
-            text = page.get_text() or ""
-            # Only keep pages with reasonable amount of text to save API calls
-            if len(text.strip()) > 50: 
-                pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
-        return pages
-    except Exception as e:
-        st.error(f"PDF 처리 중 오류: {e}")
-        return []
+    data = uploaded_file.getvalue()
+    doc = fitz.open(stream=data, filetype="pdf")
+    pages = []
+    for i, page in enumerate(doc):
+        text = page.get_text() or ""
+        if text.strip():
+            pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
+    return pages
 
 @retry.Retry(predicate=retry.if_exception_type(Exception)) 
 def get_embedding_with_retry(text, model="models/text-embedding-004"):
@@ -548,51 +540,26 @@ with tab1:
                         new_db = []
                         total_files = len(files)
                         
-                        # Loop through each file individually to handle errors gracefully
                         for i, f in enumerate(files):
-                            try:
-                                status_text.text(f"📂 파일 분석 시작: {f.name}...")
-                                pgs = extract_text_from_pdf(f)
-                                
-                                if not pgs:
-                                    st.toast(f"⚠️ {f.name}: 텍스트 없음", icon="⚠️")
-                                    continue
-                                
-                                total_pages = len(pgs)
-                                for p_idx, p in enumerate(pgs):
-                                    status_text.text(f"⏳ {f.name} ({p_idx + 1}/{total_pages} 페이지) AI 분석 중...")
-                                    
-                                    # Handle page-level errors
-                                    try:
-                                        emb = get_embedding(p["text"])
-                                        if emb:
-                                            p["embedding"] = emb
-                                            p["subject"] = final_subj
-                                            new_db.append(p)
-                                        else:
-                                            print(f"Embedding empty for {f.name} p{p_idx+1}")
-                                    except Exception as e_page:
-                                        print(f"Error on page {p_idx+1}: {e_page}")
-                                        # Skip bad page, continue
-                                    
-                                    # Add delay to avoid Rate Limit (Free Tier)
-                                    time.sleep(1.0)
-                                
-                            except Exception as e:
-                                st.error(f"❌ {f.name} 처리 중 오류: {str(e)}")
+                            status_text.text(f"처리 중: {f.name}...")
+                            pgs = extract_text_from_pdf(f)
                             
-                            # Update progress
+                            # 페이지별 임베딩 처리
+                            for p_idx, p in enumerate(pgs):
+                                emb = get_embedding(p["text"])
+                                if emb:
+                                    p["embedding"] = emb
+                                    p["subject"] = final_subj
+                                    new_db.append(p)
+                                
                             prog_bar.progress((i + 1) / total_files)
+                            
+                        st.session_state.db.extend(new_db)
+                        status_text.text("학습 완료!")
+                        st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
+                        time.sleep(1)
+                        st.rerun()
                         
-                        if new_db:
-                            st.session_state.db.extend(new_db)
-                            status_text.success(f"✅ 학습 완료! 총 {len(new_db)} 페이지 저장됨.")
-                            st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
-                            time.sleep(1.5)
-                            st.rerun()
-                        else:
-                            status_text.warning("저장된 데이터가 없습니다.")
-
         with col_list:
             st.markdown("#### 📚 내 학습 데이터")
             stats = get_subject_stats()
