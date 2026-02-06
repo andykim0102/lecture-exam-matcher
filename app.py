@@ -328,6 +328,21 @@ def transcribe_image_to_text(image, api_key):
 # 4. New LLM Logic (Parser & Generator)
 # ==========================================
 
+def split_jokbo_text(text):
+    """
+    정규표현식을 사용하여 문항 번호(1. 24. 15) 등을 기준으로 텍스트를 분리합니다.
+    (예: 24. DNA... -> [24. DNA...])
+    """
+    if not text: return []
+    # Pattern: Start of line or text + whitespace + Number + dot or parenthesis
+    # Uses Lookahead to split BEFORE the number, keeping the number in the resulting chunks
+    pattern = r'(?:\n|^)\s*(?=\d+[\.\)])'
+    
+    parts = re.split(pattern, text)
+    # Filter empty strings and strip whitespace
+    questions = [p.strip() for p in parts if p.strip()]
+    return questions
+
 def parse_raw_jokbo_llm(raw_text):
     """
     LLM을 사용하여 엉망인 족보 텍스트를 구조화된 JSON으로 변환
@@ -889,7 +904,6 @@ with tab2:
                                 
                                 # Loop through related items
                                 for i, r in enumerate(rel[:3]):
-                                    item_id = f"{psig}_{i}" # Unique ID for this item on this page
                                     content = r['content']
                                     score = r['score']
                                     raw_txt = content['text']
@@ -897,46 +911,61 @@ with tab2:
                                     with st.container(border=True):
                                         st.markdown(f"**#{i+1} 유사도 {score:.2f}** <small>({content['source']} P.{content['page']})</small>", unsafe_allow_html=True)
                                         
-                                        # 1. Raw Text Expander
-                                        with st.expander("📄 원본 텍스트 보기"):
-                                            st.text(raw_txt[:500] + "...")
+                                        # Split the raw text into potential questions
+                                        split_questions = split_jokbo_text(raw_txt)
                                         
-                                        # 2. Interactive Parse & Twin Gen
-                                        with st.expander("✨ 쌍둥이 문제 만들기", expanded=True):
-                                            # (A) Parsing Step
-                                            if item_id not in st.session_state.parsed_items:
-                                                if st.button("구조 분석 및 파싱", key=f"btn_p_{item_id}"):
-                                                    with st.spinner("AI가 족보 텍스트를 구조화 중..."):
-                                                        parsed = parse_raw_jokbo_llm(raw_txt)
-                                                        st.session_state.parsed_items[item_id] = parsed
-                                                        st.rerun()
+                                        if not split_questions:
+                                            # Fallback if no numbered questions found
+                                            split_questions = [raw_txt]
+
+                                        st.caption(f"🔍 발견된 문항: {len(split_questions)}개")
+                                        
+                                        # Render each split question as a separate card
+                                        for seq_idx, question_txt in enumerate(split_questions):
+                                            item_id = f"{psig}_{i}_{seq_idx}" # Unique ID per segment
                                             
-                                            # Show Parsed Result
-                                            parsed_res = st.session_state.parsed_items.get(item_id)
-                                            if parsed_res:
-                                                if parsed_res["success"]:
-                                                    data = parsed_res["data"]
-                                                    st.caption("✅ 파싱 성공")
-                                                    st.markdown(f"**Q:** {data.get('question')}")
-                                                    st.markdown(f"**A:** {data.get('answer')}")
-                                                    
-                                                    # (B) Generation Step
-                                                    if item_id not in st.session_state.twin_items:
-                                                        if st.button("변형 문제 생성", key=f"btn_g_{item_id}", type="primary"):
-                                                            with st.spinner("변형 문제 생성 중..."):
-                                                                twin_res = generate_twin_problem_llm(parsed_res, st.session_state.t2_selected_subject)
-                                                                st.session_state.twin_items[item_id] = twin_res
-                                                                st.rerun()
-                                                    
-                                                    # Show Generated Result
-                                                    twin_res = st.session_state.twin_items.get(item_id)
-                                                    if twin_res:
-                                                        st.divider()
-                                                        st.markdown(twin_res)
+                                            st.markdown(f"""
+                                            <div class="jokbo-item">
+                                                {question_txt}
+                                            </div>
+                                            """, unsafe_allow_html=True)
+
+                                            # Interactive Parse & Twin Gen for THIS question
+                                            with st.expander(f"✨ 이 문항으로 쌍둥이 문제 만들기", expanded=False):
+                                                # (A) Parsing Step
+                                                if item_id not in st.session_state.parsed_items:
+                                                    if st.button("구조 분석 및 파싱", key=f"btn_p_{item_id}"):
+                                                        with st.spinner("AI가 족보 텍스트를 구조화 중..."):
+                                                            parsed = parse_raw_jokbo_llm(question_txt)
+                                                            st.session_state.parsed_items[item_id] = parsed
+                                                            st.rerun()
+                                                
+                                                # Show Parsed Result
+                                                parsed_res = st.session_state.parsed_items.get(item_id)
+                                                if parsed_res:
+                                                    if parsed_res["success"]:
+                                                        data = parsed_res["data"]
+                                                        st.caption("✅ 파싱 성공")
+                                                        st.markdown(f"**Q:** {data.get('question')}")
+                                                        st.markdown(f"**A:** {data.get('answer')}")
+                                                        
+                                                        # (B) Generation Step
+                                                        if item_id not in st.session_state.twin_items:
+                                                            if st.button("변형 문제 생성", key=f"btn_g_{item_id}", type="primary"):
+                                                                with st.spinner("변형 문제 생성 중..."):
+                                                                    twin_res = generate_twin_problem_llm(parsed_res, st.session_state.t2_selected_subject)
+                                                                    st.session_state.twin_items[item_id] = twin_res
+                                                                    st.rerun()
+                                                        
+                                                        # Show Generated Result
+                                                        twin_res = st.session_state.twin_items.get(item_id)
+                                                        if twin_res:
+                                                            st.divider()
+                                                            st.markdown(twin_res)
+                                                    else:
+                                                        st.error("파싱 실패: 텍스트가 너무 불완전합니다.")
                                                 else:
-                                                    st.error("파싱 실패: 텍스트가 너무 불완전합니다.")
-                                            else:
-                                                st.caption("먼저 '구조 분석'을 눌러주세요.")
+                                                    st.caption("먼저 '구조 분석'을 눌러주세요.")
                         else:
                             st.info("분석할 텍스트가 없습니다.")
 
