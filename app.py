@@ -1,4 +1,4 @@
-# app.py (UI: Original Rich Style / Logic: Smart Model Discovery Fix)
+# app.py (UI: Original Rich Style / Logic: Smart Model Discovery + OCR Fallback)
 import time
 import re
 import random
@@ -206,18 +206,6 @@ def get_best_model(models, keywords):
         if found: return found[0]
     return models[0]
 
-def extract_text_from_pdf(uploaded_file):
-    try:
-        data = uploaded_file.getvalue()
-        doc = fitz.open(stream=data, filetype="pdf")
-        pages = []
-        for i, page in enumerate(doc):
-            text = page.get_text() or ""
-            pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
-        return pages
-    except:
-        return []
-
 # [UPDATED] Smart Robust Embedding
 def get_embedding_robust(text: str, status_placeholder=None):
     """
@@ -337,6 +325,20 @@ def transcribe_audio_gemini(audio_bytes, api_key):
         return response.text
     except Exception as e:
         st.error(f"음성 인식 실패: {e}")
+        return None
+
+# [NEW] 이미지 텍스트 변환 (OCR Fallback)
+def transcribe_image_to_text(image, api_key):
+    try:
+        genai.configure(api_key=api_key)
+        # 이미지 인식은 Flash 모델이 가장 빠르고 효율적
+        model = genai.GenerativeModel("gemini-1.5-flash")
+        response = model.generate_content([
+            "Extract all text from this image exactly as is. Just the text, no comments.",
+            image
+        ])
+        return response.text
+    except Exception:
         return None
 
 # --- Prompt Builders (Original Rich Prompts Restored) ---
@@ -572,11 +574,10 @@ with tab1:
                     elif not files: st.warning("파일을 선택해주세요.")
                     else:
                         # ---------------------------------------------------------
-                        # [SMART ROBUST LOGIC] 투명한 처리 로그 & 스마트 스킵
+                        # [SMART ROBUST LOGIC] OCR Fallback 추가
                         # ---------------------------------------------------------
                         prog_bar = st.progress(0)
                         
-                        # 상태 로그창 생성
                         with st.expander("📝 처리 로그 보기 (클릭하여 펼치기)", expanded=True):
                             log_container = st.empty()
                             logs = []
@@ -591,34 +592,48 @@ with tab1:
                             for i, f in enumerate(files):
                                 try:
                                     log(f"📂 **{f.name}** 분석 시작...")
-                                    pgs = extract_text_from_pdf(f)
                                     
-                                    if not pgs:
-                                        log(f"⚠️ {f.name}: 텍스트 없음 (이미지 스캔본?)")
-                                        continue
-                                    
-                                    total_pages = len(pgs)
+                                    # [CHANGED] 루프 안에서 문서 열고 처리 (OCR 이미지 접근 위해)
+                                    doc = fitz.open(stream=f.getvalue(), filetype="pdf")
+                                    total_pages = len(doc)
                                     success_cnt = 0
                                     skip_cnt = 0
                                     
-                                    for p_idx, p in enumerate(pgs):
-                                        # 진행 상황 로그 업데이트
+                                    for p_idx, page in enumerate(doc):
                                         log_container.markdown(f"⏳ **{f.name}** 처리 중... ({p_idx + 1}/{total_pages} 페이지)")
                                         
-                                        # Robust Embedding 호출 (자동 모델 전환 및 재시도 포함)
-                                        # status_placeholder를 넘겨주어 모델 전환 메시지를 보여줌
-                                        emb, err_msg = get_embedding_robust(p["text"], status_placeholder=st.empty())
+                                        text = page.get_text().strip()
+                                        
+                                        # [NEW] 텍스트가 너무 짧으면 이미지로 OCR 시도
+                                        if len(text) < 50:
+                                            # log(f"ℹ️ P.{p_idx+1}: 텍스트 부족. AI 이미지 인식(OCR) 시도...")
+                                            try:
+                                                pix = page.get_pixmap()
+                                                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                                                ocr_text = transcribe_image_to_text(img, st.session_state.api_key)
+                                                if ocr_text:
+                                                    text = ocr_text
+                                                    log(f"✨ P.{p_idx+1}: 이미지에서 텍스트 추출 성공!")
+                                            except Exception:
+                                                pass # OCR 실패하면 원래대로 스킵
+
+                                        # Robust Embedding 호출
+                                        emb, err_msg = get_embedding_robust(text, status_placeholder=st.empty())
                                         
                                         if emb:
-                                            p["embedding"] = emb
-                                            p["subject"] = final_subj
-                                            new_db.append(p)
+                                            p_data = {
+                                                "page": p_idx + 1,
+                                                "text": text,
+                                                "source": f.name,
+                                                "embedding": emb,
+                                                "subject": final_subj
+                                            }
+                                            new_db.append(p_data)
                                             success_cnt += 1
                                         elif err_msg == "text_too_short":
                                             skip_cnt += 1
-                                            # log(f"ℹ️ P.{p_idx+1} 내용 부족 (건너뜀)") # 너무 시끄러우니 생략
+                                            log(f"⚠️ P.{p_idx+1}: 내용 없음 (스킵)")
                                         else:
-                                            # [FIXED] 구체적인 에러 메시지 표시
                                             log(f"❌ P.{p_idx+1} 임베딩 실패 ({err_msg})")
                                     
                                     log(f"✅ **{f.name}** 완료: 성공 {success_cnt}, 스킵 {skip_cnt}")
@@ -634,7 +649,7 @@ with tab1:
                                 time.sleep(1.5)
                                 st.rerun()
                             else:
-                                st.warning("저장된 데이터가 없습니다.")
+                                st.warning("저장된 데이터가 없습니다. (문서에 텍스트가 없거나 인식할 수 없습니다.)")
                         # ---------------------------------------------------------
                         
         with col_list:
@@ -749,6 +764,8 @@ with tab2:
                     ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
                     
                     if not p_text.strip():
+                        # [NEW] 강의 뷰어에서도 OCR 시도 가능 (Optional)
+                        # 여기서는 일단 텍스트 없으면 캡션만 표시 (너무 느려질 수 있어서)
                         analysis_ready = False
                         with ai_tab1: st.caption("텍스트가 없는 이미지 페이지입니다.")
                     else:
