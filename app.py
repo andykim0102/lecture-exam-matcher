@@ -1,4 +1,4 @@
-# app.py (UI: Modern Card & Tabs / Logic: Auto-Analyze Top Items + "View More" for others)
+# app.py (UI: Modern Card / Logic: Show ALL Relevant + Instant Auto-Analysis + Styled Twin)
 import time
 import re
 import random
@@ -88,20 +88,15 @@ st.markdown("""
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 10. Exam Card Style */
+    /* 10. Exam Card Style (Original) */
     .exam-card {
         background-color: #ffffff;
         border: 1px solid #e0e0e0;
         border-radius: 16px;
         padding: 24px;
-        margin-bottom: 20px;
+        margin-bottom: 15px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.04);
-        transition: transform 0.2s;
-    }
-    .exam-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 8px 16px rgba(0,0,0,0.08);
-        border-color: #007aff;
+        position: relative;
     }
     .exam-meta {
         font-size: 0.85rem;
@@ -114,22 +109,66 @@ st.markdown("""
         padding-bottom: 8px;
     }
     .exam-score-badge {
-        background-color: #e3f2fd;
-        color: #1565c0;
+        background-color: #fff3e0;
+        color: #f57c00;
         padding: 4px 8px;
         border-radius: 6px;
         font-weight: 700;
         font-size: 0.8rem;
     }
     .exam-question {
-        font-size: 1.1rem;
-        font-weight: 600;
+        font-size: 1.05rem;
+        font-weight: 500;
         color: #333;
         line-height: 1.6;
-        margin-bottom: 15px;
     }
 
-    /* 11. Sidebar Items */
+    /* 11. Twin Problem Card Style */
+    .twin-card {
+        background-color: #f5faff; /* Light Blue tint */
+        border: 1px solid #bbdefb;
+        border-radius: 16px;
+        padding: 24px;
+        margin-top: 15px;
+        margin-bottom: 15px;
+        box-shadow: 0 2px 8px rgba(33,150,243,0.08);
+    }
+    .twin-badge {
+        background-color: #2196f3;
+        color: white;
+        padding: 4px 8px;
+        border-radius: 6px;
+        font-weight: 700;
+        font-size: 0.8rem;
+        margin-bottom: 10px;
+        display: inline-block;
+    }
+
+    /* 12. Answer/Explanation Box */
+    .explanation-box {
+        background-color: #f1f8e9;
+        border-left: 5px solid #7cb342;
+        padding: 15px 20px;
+        border-radius: 4px;
+        margin-top: 15px;
+        margin-bottom: 25px;
+    }
+    .exp-title {
+        font-weight: 800;
+        color: #558b2f;
+        margin-bottom: 5px;
+        font-size: 0.9rem;
+    }
+    .exp-text {
+        font-size: 0.95rem;
+        color: #33691e;
+        line-height: 1.5;
+    }
+
+    /* 13. Hot Page Button */
+    .hot-page-btn-score { font-size: 0.8em; color: #ff3b30; }
+
+    /* 14. Sidebar Items */
     .sidebar-subject {
         padding: 10px 15px;
         background-color: white;
@@ -142,31 +181,6 @@ st.markdown("""
         display: flex;
         align-items: center;
         gap: 8px;
-    }
-    .sidebar-icon { font-size: 1.1rem; }
-    
-    /* 12. Hot Page Button */
-    .hot-page-btn-score { font-size: 0.8em; color: #ff3b30; }
-
-    /* 13. Answer Box */
-    .answer-box {
-        background-color: #f1f8e9;
-        border: 1px solid #c5e1a5;
-        padding: 16px;
-        border-radius: 8px;
-        font-size: 0.95rem;
-        color: #33691e;
-    }
-    
-    /* 14. Auto badge */
-    .auto-badge {
-        background-color: #e3f2fd;
-        color: #1565c0;
-        padding: 2px 8px;
-        border-radius: 10px;
-        font-size: 0.75rem;
-        font-weight: bold;
-        margin-left: 8px;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -307,6 +321,7 @@ def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
     sims = cosine_similarity([query_emb], db_embs)[0]
     top_idxs = np.argsort(sims)[::-1][:top_k]
     # Filter by a reasonable threshold to avoid showing completely irrelevant stuff
+    # Slightly higher threshold to ensure quality
     results = [{"score": float(sims[i]), "content": valid_items[i]} for i in top_idxs if sims[i] > 0.55]
     return results
 
@@ -377,9 +392,21 @@ def generate_twin_problem_llm(parsed_data, subject):
     Create a 'Twin Problem' (similar logic, different values/scenario) for:
     Subject: {subject}
     Original: {json.dumps(data, ensure_ascii=False)}
-    Output Format:
-    **[변형 문제]** ...
-    **[정답 및 해설]** ...
+    
+    Instruction:
+    1. Create a similar question (Twin Problem).
+    2. Provide Answer & Explanation.
+    
+    Output Format (Markdown):
+    ### Question
+    (Problem text here)
+    (Choices list with numbers like 1. 2. 3...)
+    
+    ### Answer
+    (Correct Answer)
+    
+    ### Explanation
+    (Detailed reasoning)
     """
     try:
         res_text, _ = generate_with_fallback(prompt, st.session_state.text_models)
@@ -635,17 +662,11 @@ with tab2:
                     else:
                         st.success(f"🔥 **{len(rel)}개의 관련 족보 문항이 발견되었습니다.**")
                         
-                        # ==========================================
-                        # NEW DISPLAY LOGIC (Top 2 + View More)
-                        # ==========================================
-                        
-                        # 1. Separate Top 2 (High Relevance) and Others
-                        # Assuming 'rel' is sorted by find_relevant_jokbo
-                        top_rel = rel[:2]
-                        other_rel = rel[2:]
+                        # Loop through ALL relevant items (Limit to top 5 to avoid infinite loop lag if many)
+                        # The user wants to see "relevant items", not just top 2.
+                        display_rel = rel[:10] # Display up to 10 relevant items
 
-                        # --- Part A: Top 2 Items (Auto Analyze) ---
-                        for i, r in enumerate(top_rel): 
+                        for i, r in enumerate(display_rel): 
                             content = r['content']
                             score = r['score']
                             raw_txt = content['text']
@@ -657,84 +678,61 @@ with tab2:
                             for q_idx, q_txt in enumerate(questions):
                                 item_id = f"{psig}_{i}_{q_idx}"
                                 
+                                # 1. Display Original Exam Card
                                 st.markdown(f"""
                                 <div class="exam-card">
                                     <div class="exam-meta">
-                                        <span><span class="exam-score-badge">TOP {i+1}</span> {score:.0%} 일치 &nbsp;|&nbsp; {content['source']} (P.{content['page']})</span>
+                                        <span><span class="exam-score-badge">유사도 {score:.0%}</span> &nbsp; {content['source']} (P.{content['page']})</span>
                                     </div>
                                     <div class="exam-question">
-                                        {q_txt[:400] + ('...' if len(q_txt)>400 else '')}
+                                        {q_txt[:500] + ('...' if len(q_txt)>500 else '')}
                                     </div>
                                 </div>
                                 """, unsafe_allow_html=True)
 
-                                # AUTO-ANALYSIS LOGIC (ALWAYS RUN FOR TOP ITEMS)
+                                # 2. Instant Auto-Analysis Logic
                                 if item_id not in st.session_state.parsed_items:
-                                    with st.spinner("🤖 AI가 자동으로 분석 중입니다..."):
+                                    with st.spinner(f"⚡ 문항 #{i+1}-{q_idx+1} 분석 중..."):
                                         parsed = parse_raw_jokbo_llm(q_txt)
                                         st.session_state.parsed_items[item_id] = parsed
                                         if parsed["success"]:
                                             twin = generate_twin_problem_llm(parsed, target_subj)
                                             st.session_state.twin_items[item_id] = twin
-                                        st.rerun()
+                                        st.rerun() # Refresh to show results immediately
 
-                                # Render Analysis Result (Tabs)
+                                # 3. Render Analysis Results (Styled)
                                 if item_id in st.session_state.parsed_items:
                                     parsed = st.session_state.parsed_items[item_id]
                                     if parsed["success"]:
                                         d = parsed["data"]
-                                        tab_ans, tab_twin = st.tabs(["✅ 정답 및 해설", "🧩 변형 문제"])
-                                        with tab_ans:
+                                        
+                                        # Use Tabs for cleaner layout
+                                        t_ans, t_twin = st.tabs(["💡 정답 및 해설", "🧩 쌍둥이(변형) 문제"])
+                                        
+                                        with t_ans:
                                             st.markdown(f"""
-                                            <div class="answer-box">
-                                                <strong>✅ 정답:</strong> {d.get('answer','N/A')}<br><br>
-                                                <strong>💡 해설:</strong> {d.get('explanation','N/A')}
+                                            <div class="explanation-box">
+                                                <div class="exp-title">✅ 정답</div>
+                                                <div class="exp-text">{d.get('answer','정보 없음')}</div>
+                                                <br>
+                                                <div class="exp-title">📘 상세 해설</div>
+                                                <div class="exp-text">{d.get('explanation','정보 없음')}</div>
                                             </div>
                                             """, unsafe_allow_html=True)
-                                        with tab_twin:
-                                            st.markdown(st.session_state.twin_items.get(item_id, "생성 실패"))
+                                        
+                                        with t_twin:
+                                            twin_content = st.session_state.twin_items.get(item_id, "생성 실패")
+                                            # Render Twin as a Card
+                                            st.markdown(f"""
+                                            <div class="twin-card">
+                                                <div class="twin-badge">TWIN PROBLEM</div>
+                                                <div class="exam-question">
+                                                    {twin_content}
+                                                </div>
+                                            </div>
+                                            """, unsafe_allow_html=True)
                                     else:
-                                        st.error("분석 실패")
-                        
-                        # --- Part B: View More (Manual Analyze) ---
-                        if other_rel:
-                            with st.expander(f"📚 관련 족보 더보기 ({len(other_rel)}개 문항)"):
-                                for i, r in enumerate(other_rel):
-                                    # Adjust index offset for IDs
-                                    real_idx = i + 2
-                                    content = r['content']
-                                    score = r['score']
-                                    raw_txt = content['text']
-                                    
-                                    questions = split_jokbo_text(raw_txt)
-                                    if not questions: questions = [raw_txt]
-                                    
-                                    for q_idx, q_txt in enumerate(questions):
-                                        item_id = f"{psig}_{real_idx}_{q_idx}"
-                                        
-                                        st.markdown(f"""
-                                        <div style="padding:15px; background:#fff; border:1px solid #ddd; border-radius:10px; margin-bottom:10px;">
-                                            <small style="color:#888;">{score:.0%} 일치 | {content['source']} (P.{content['page']})</small>
-                                            <div style="font-weight:600; margin-top:5px;">{q_txt[:200]}...</div>
-                                        </div>
-                                        """, unsafe_allow_html=True)
-                                        
-                                        # Click to Analyze (Manual)
-                                        if st.button("🔍 분석 보기", key=f"btn_more_{item_id}"):
-                                            with st.spinner("분석 중..."):
-                                                parsed = parse_raw_jokbo_llm(q_txt)
-                                                st.session_state.parsed_items[item_id] = parsed
-                                                if parsed["success"]:
-                                                    twin = generate_twin_problem_llm(parsed, target_subj)
-                                                    st.session_state.twin_items[item_id] = twin
-                                                st.rerun()
-                                        
-                                        if item_id in st.session_state.parsed_items:
-                                            parsed = st.session_state.parsed_items[item_id]
-                                            if parsed["success"]:
-                                                d = parsed["data"]
-                                                st.markdown(f"**정답:** {d.get('answer')}")
-                                                st.caption(d.get('explanation'))
+                                        st.error("분석 실패 (텍스트가 불완전합니다)")
 
 # --- TAB 3: 녹음 (Existing) ---
 with tab3:
