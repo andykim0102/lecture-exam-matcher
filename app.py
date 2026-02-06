@@ -87,24 +87,24 @@ st.markdown("""
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 10. Jokbo Card Style (NEW - Clean Design) */
+    /* 10. Jokbo Card Style (NEW) */
     .jokbo-card {
         background-color: #ffffff;
         border: 1px solid #e5e5ea;
         border-radius: 16px;
-        padding: 24px;
+        padding: 20px;
         margin-bottom: 15px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.03);
         transition: all 0.2s ease;
     }
     .jokbo-card:hover {
-        box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+        box-shadow: 0 8px 16px rgba(0,0,0,0.06);
         transform: translateY(-2px);
     }
     .jokbo-header {
         display: flex;
         gap: 8px;
-        margin-bottom: 16px;
+        margin-bottom: 12px;
         align-items: center;
     }
     .tag-year {
@@ -112,28 +112,27 @@ st.markdown("""
         color: #1565c0;
         padding: 4px 10px;
         border-radius: 6px;
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         font-weight: 700;
-        letter-spacing: -0.3px;
+        letter-spacing: -0.5px;
     }
     .tag-freq {
         background-color: #ffebee;
         color: #c62828;
         padding: 4px 10px;
         border-radius: 6px;
-        font-size: 0.8rem;
+        font-size: 0.75rem;
         font-weight: 700;
-        letter-spacing: -0.3px;
+        letter-spacing: -0.5px;
     }
     .jokbo-content {
-        font-size: 1.05rem;
+        font-size: 1rem;
         line-height: 1.6;
         color: #1c1c1e;
         font-weight: 500;
     }
     .jokbo-divider {
-        margin-top: 20px;
-        margin-bottom: 5px;
+        margin: 15px 0;
         border-bottom: 1px dashed #e0e0e0;
     }
     
@@ -262,7 +261,7 @@ def format_jokbo_text(text):
     return formatted.strip()
 
 def extract_year_from_source(source_name):
-    """파일명에서 4자리 연도 추출 (예: 2023_해부학.pdf -> 2023)"""
+    # Regex to find 4 digits starting with 20 (e.g., 2021, 2024)
     match = re.search(r'20\d{2}', source_name)
     return match.group(0) if match else None
 
@@ -313,19 +312,14 @@ def pick_best_text_model(model_names: list[str]):
     return flash[0] if flash else model_names[0]
 
 def extract_text_from_pdf(uploaded_file):
-    try:
-        data = uploaded_file.getvalue()
-        doc = fitz.open(stream=data, filetype="pdf")
-        pages = []
-        for i, page in enumerate(doc):
-            text = page.get_text() or ""
-            # Only keep pages with reasonable amount of text to save API calls
-            if len(text.strip()) > 50: 
-                pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
-        return pages
-    except Exception as e:
-        st.error(f"PDF 처리 중 오류: {e}")
-        return []
+    data = uploaded_file.getvalue()
+    doc = fitz.open(stream=data, filetype="pdf")
+    pages = []
+    for i, page in enumerate(doc):
+        text = page.get_text() or ""
+        if text.strip():
+            pages.append({"page": i + 1, "text": text, "source": uploaded_file.name})
+    return pages
 
 @retry.Retry(predicate=retry.if_exception_type(Exception)) 
 def get_embedding_with_retry(text, model="models/text-embedding-004"):
@@ -581,50 +575,30 @@ with tab1:
                     elif not files: st.warning("파일을 선택해주세요.")
                     else:
                         prog_bar = st.progress(0)
-                        status_text = st.empty() # Placeholder for status messages
+                        status_text = st.empty()
                         new_db = []
                         total_files = len(files)
                         
-                        try:
-                            for i, f in enumerate(files):
-                                status_text.text(f"📂 파일 분석 중: {f.name}...")
-                                pgs = extract_text_from_pdf(f)
-                                
-                                if not pgs:
-                                    st.warning(f"⚠️ {f.name}에서 텍스트를 추출할 수 없습니다. (스캔된 이미지일 수 있음)")
-                                    continue
-                                
-                                total_pages = len(pgs)
-                                for p_idx, p in enumerate(pgs):
-                                    # Update Status Text with details
-                                    status_text.text(f"⏳ {f.name} 처리 중... ({p_idx + 1}/{total_pages} 페이지 임베딩 생성)")
-                                    
-                                    emb = get_embedding(p["text"])
-                                    if emb:
-                                        p["embedding"] = emb
-                                        p["subject"] = final_subj
-                                        new_db.append(p)
-                                    else:
-                                        # Log but don't stop
-                                        print(f"Embedding failed for {f.name} page {p_idx+1}")
-                                    
-                                    # Rate limiting precaution
-                                    time.sleep(0.5)
-                                
-                                prog_bar.progress((i + 1) / total_files)
+                        for i, f in enumerate(files):
+                            status_text.text(f"처리 중: {f.name}...")
+                            pgs = extract_text_from_pdf(f)
                             
-                            if new_db:
-                                st.session_state.db.extend(new_db)
-                                status_text.success(f"✅ 학습 완료! 총 {len(new_db)} 페이지가 추가되었습니다.")
-                                st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
-                                time.sleep(1.5)
-                                st.rerun()
-                            else:
-                                status_text.error("❌ 처리된 데이터가 없습니다. PDF가 텍스트를 포함하고 있는지 확인해주세요.")
+                            # 페이지별 임베딩 처리
+                            for p_idx, p in enumerate(pgs):
+                                emb = get_embedding(p["text"])
+                                if emb:
+                                    p["embedding"] = emb
+                                    p["subject"] = final_subj
+                                    new_db.append(p)
                                 
-                        except Exception as e:
-                            status_text.error(f"❌ 처리 중 오류 발생: {str(e)}")
-
+                            prog_bar.progress((i + 1) / total_files)
+                            
+                        st.session_state.db.extend(new_db)
+                        status_text.text("학습 완료!")
+                        st.toast(f"{len(new_db)} 페이지 학습 완료!", icon="🎉")
+                        time.sleep(1)
+                        st.rerun()
+                        
         with col_list:
             st.markdown("#### 📚 내 학습 데이터")
             stats = get_subject_stats()
@@ -824,7 +798,7 @@ with tab2:
                                     if isinstance(res_dict, dict):
                                         # Custom container for actions to match the card width
                                         # We can't put them inside the card div easily, but we can group them.
-                                        with st.expander("📑 정답 및 해설", expanded=False):
+                                        with st.expander("📝 정답 및 해설", expanded=False):
                                             st.markdown(res_dict.get("EXPLANATION", "생성 중..."))
                                         with st.expander("🎯 출제 포인트"):
                                             st.markdown(res_dict.get("DIRECTION", "분석 중..."))
