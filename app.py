@@ -1,4 +1,4 @@
-# app.py (UI: Original Rich Style / Logic: Smart Model Discovery + OCR Fallback)
+# app.py (UI: Original Rich Style / Logic: Smart Model Discovery + OCR Fallback + Robust Parsing)
 import time
 import re
 import random
@@ -127,7 +127,6 @@ st.markdown("""
 # ==========================================
 # 1. Session state initialization
 # ==========================================
-# [NEW] 모델 리스트 관리용 상태 변수 추가
 defaults = {
     "logged_in": False, "db": [], "api_key": None, "api_key_ok": False,
     "text_models": [], "embedding_models": [], "best_text_model": None, "best_embedding_model": None,
@@ -183,7 +182,6 @@ def ensure_configured():
     if st.session_state.get("api_key"):
         genai.configure(api_key=st.session_state["api_key"])
 
-# [NEW] 텍스트/임베딩 모델 분리 검색 함수
 @st.cache_data(show_spinner=False)
 def list_available_models(api_key: str):
     """API 키로 사용 가능한 텍스트 및 임베딩 모델을 자동으로 찾습니다."""
@@ -206,7 +204,6 @@ def get_best_model(models, keywords):
         if found: return found[0]
     return models[0]
 
-# [UPDATED] Smart Robust Embedding
 def get_embedding_robust(text: str, status_placeholder=None):
     """
     1. 사용 가능한 모델 리스트에서 임베딩 모델을 찾음.
@@ -230,21 +227,17 @@ def get_embedding_robust(text: str, status_placeholder=None):
     if not candidates:
         return None, "No embedding models available."
         
-    # 우선순위 정렬 (004 선호)
     sorted_candidates = sorted(candidates, key=lambda x: 0 if 'text-embedding-004' in x else 1)
     
     max_retries = 5
     base_wait = 3
     last_error_msg = ""
 
-    # 모델 하나씩 시도 (보통 첫번째에서 성공해야 함)
     for model_name in sorted_candidates[:2]: # 상위 2개만 시도
         for attempt in range(max_retries):
             try:
-                # API 호출 속도 조절 (무료 티어 배려)
                 time.sleep(1.5) 
                 
-                # 모델에 따른 파라미터 조정
                 if "004" in model_name:
                     res = genai.embed_content(model=model_name, content=text, task_type="retrieval_document")
                 else:
@@ -263,7 +256,6 @@ def get_embedding_robust(text: str, status_placeholder=None):
                         status_placeholder.caption(f"⚠️ 사용량 많음 ({model_name}). {wait_time}초 대기 중... ({attempt+1}/{max_retries})")
                     time.sleep(wait_time)
                 elif "404" in err_msg or "Not Found" in err_msg:
-                    # 모델이 없으면 즉시 다음 모델로
                     break
                 else:
                     time.sleep(1)
@@ -277,7 +269,6 @@ def filter_db_by_subject(subject: str, db: list[dict]):
 
 def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
     if not db: return []
-    # 쿼리 임베딩도 Robust하게 처리 (tuple 반환 처리)
     query_emb, _ = get_embedding_robust(query_text)
     if not query_emb: return []
     
@@ -293,10 +284,8 @@ def find_relevant_jokbo(query_text: str, db: list[dict], top_k: int = 5):
 
 def generate_with_fallback(prompt: str, model_names: list[str]):
     ensure_configured()
-    # [UPDATED] 세션에 저장된 베스트 텍스트 모델 사용
     target_model = st.session_state.best_text_model or "gemini-1.5-flash"
     
-    # 없으면 받은 리스트나 기본값으로 시도
     candidates = [target_model]
     if model_names: candidates.extend(model_names)
     candidates = list(dict.fromkeys(candidates)) # 중복제거
@@ -327,11 +316,9 @@ def transcribe_audio_gemini(audio_bytes, api_key):
         st.error(f"음성 인식 실패: {e}")
         return None
 
-# [NEW] 이미지 텍스트 변환 (OCR Fallback)
 def transcribe_image_to_text(image, api_key):
     try:
         genai.configure(api_key=api_key)
-        # 이미지 인식은 Flash 모델이 가장 빠르고 효율적
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content([
             "Extract all text from this image exactly as is. Just the text, no comments.",
@@ -341,7 +328,7 @@ def transcribe_image_to_text(image, api_key):
     except Exception:
         return None
 
-# --- Prompt Builders (Original Rich Prompts Restored) ---
+# --- Prompt Builders (Improved with Persona) ---
 def build_overview_prompt(first_page_text, subject):
     return f"""
     너는 의대 수석 조교다. 지금 학생이 '{subject}' 강의록의 첫 페이지(표지/목차)를 보고 있다.
@@ -356,36 +343,42 @@ def build_overview_prompt(first_page_text, subject):
     3. ⚠️ 주의해야 할 점
     """
 
+# [UPDATED] 수석 조교 페르소나 적용된 프롬프트
 def build_page_analysis_prompt(lecture_text, related_jokbo, subject):
     jokbo_ctx = "\n".join([f"- {r['content']['text'][:300]}" for r in related_jokbo[:3]])
     return f"""
-    너는 의대 조교다. 현재 강의록 페이지와 연관된 족보(기출)를 분석해라.
-    과목: {subject}
+    당신은 의대생 후배의 공부를 도와주는 유능한 '수석 조교'입니다.
+    현재 강의록 페이지와 연관된 족보(기출) 데이터를 분석하여, 시험에 직결되는 실전 팁을 제공하세요.
     
-    [관련 족보/기출 내용]
+    [과목]: {subject}
+    
+    [참고할 족보/기출 데이터]
     {jokbo_ctx}
     
-    [현재 강의 내용]
+    [현재 강의록 페이지 내용]
     {lecture_text[:1500]}
     
-    다음 3가지 섹션으로 나누어 출력하라. 각 섹션 헤더를 정확히 지킬 것.
-    내용은 마크다운(Markdown) 형식을 사용하여 가독성 있게 작성할 것.
+    ---
+    
+    **작성 지침:**
+    다음 3가지 섹션 헤더([SECTION: ...])를 정확히 사용하여 답변을 작성하세요.
+    내용은 마크다운(Markdown)을 쓰되, **코드 블록(```)은 절대 사용하지 마세요.**
     
     [SECTION: DIRECTION]
-    이 페이지 공부 방향성을 한 문단으로 요약. 
-    - **핵심 키워드**: ...
-    - **암기 우선순위**: ...
+    **"이 페이지, 이렇게 공부해야 시험에 붙는다!"**
+    족보(기출) 출제 경향을 바탕으로, 해당 페이지에서 무엇을 외워야 하고 무엇을 버려야 하는지 명확한 가이드를 제시하세요.
+    - 💡 **핵심 포인트**: (시험에 자주 나오는 개념 콕 집어주기)
+    - ⚠️ **주의사항**: (함정으로 나오기 쉬운 부분)
     
     [SECTION: TWIN_Q]
-    위 족보 문제와 유사한 '쌍둥이 문제(변형 문제)'를 1개 만들어라.
-    **Q. 문제 내용...**
-    1) 보기 ...
-    2) 보기 ...
+    위 족보 문제와 **문제 유형, 형식, 난이도가 완벽히 동일한** '쌍둥이 문제(변형 문제)'를 1문제 만드세요.
+    - 기출 문제의 논리를 그대로 따르되 숫자나 상황만 살짝 비틀어 연습할 수 있게 하세요.
+    - 객관식이라면 보기 5개를 반드시 포함하세요.
     
     [SECTION: EXPLANATION]
-    **정답: ...**
-    
-    > **해설**: 위 쌍둥이 문제의 정답 이유와 관련 이론 설명.
+    위 쌍둥이 문제의 **정답 및 상세 해설**을 작성하세요.
+    - 단순히 "답은 A다"가 아니라, **"왜 A가 답이고, 나머지는 왜 오답인지"** 의대생 시각에서 논리적으로 설명하세요.
+    - 암기 팁이나 두문자(Mnemonic)가 있다면 함께 알려주세요.
     """
 
 def build_chat_prompt(history: list, context_text: str, related_jokbo: list, question: str):
@@ -500,7 +493,6 @@ with st.sidebar:
         if api_key_input:
             st.session_state.api_key = api_key_input.strip()
             
-        # [NEW] 모델 자동 검색 버튼
         if st.button("🔄 모델 목록 불러오기 (연결 테스트)", use_container_width=True):
             if not st.session_state.api_key:
                 st.error("API Key를 입력하세요.")
@@ -513,7 +505,6 @@ with st.sidebar:
                         st.session_state.text_models = t_mods
                         st.session_state.embedding_models = e_mods
                         
-                        # Best model selection
                         st.session_state.best_text_model = get_best_model(t_mods, ["flash", "pro"])
                         st.session_state.best_embedding_model = get_best_model(e_mods, ["text-embedding-004", "004"])
                         
@@ -569,13 +560,9 @@ with tab1:
                 files = st.file_uploader("PDF 선택", accept_multiple_files=True, type="pdf", label_visibility="collapsed")
                 
                 if st.button("학습 시작", type="primary", use_container_width=True):
-                    # [CHECK] API 키 체크 방식 변경
                     if not st.session_state.api_key_ok: st.error("왼쪽 설정에서 '모델 목록 불러오기'를 먼저 해주세요!")
                     elif not files: st.warning("파일을 선택해주세요.")
                     else:
-                        # ---------------------------------------------------------
-                        # [SMART ROBUST LOGIC] OCR Fallback 추가
-                        # ---------------------------------------------------------
                         prog_bar = st.progress(0)
                         
                         with st.expander("📝 처리 로그 보기 (클릭하여 펼치기)", expanded=True):
@@ -592,8 +579,6 @@ with tab1:
                             for i, f in enumerate(files):
                                 try:
                                     log(f"📂 **{f.name}** 분석 시작...")
-                                    
-                                    # [CHANGED] 루프 안에서 문서 열고 처리 (OCR 이미지 접근 위해)
                                     doc = fitz.open(stream=f.getvalue(), filetype="pdf")
                                     total_pages = len(doc)
                                     success_cnt = 0
@@ -604,9 +589,7 @@ with tab1:
                                         
                                         text = page.get_text().strip()
                                         
-                                        # [NEW] 텍스트가 너무 짧으면 이미지로 OCR 시도
                                         if len(text) < 50:
-                                            # log(f"ℹ️ P.{p_idx+1}: 텍스트 부족. AI 이미지 인식(OCR) 시도...")
                                             try:
                                                 pix = page.get_pixmap()
                                                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
@@ -615,9 +598,8 @@ with tab1:
                                                     text = ocr_text
                                                     log(f"✨ P.{p_idx+1}: 이미지에서 텍스트 추출 성공!")
                                             except Exception:
-                                                pass # OCR 실패하면 원래대로 스킵
+                                                pass
 
-                                        # Robust Embedding 호출
                                         emb, err_msg = get_embedding_robust(text, status_placeholder=st.empty())
                                         
                                         if emb:
@@ -650,7 +632,6 @@ with tab1:
                                 st.rerun()
                             else:
                                 st.warning("저장된 데이터가 없습니다. (문서에 텍스트가 없거나 인식할 수 없습니다.)")
-                        # ---------------------------------------------------------
                         
         with col_list:
             st.markdown("#### 📚 내 학습 데이터")
@@ -658,7 +639,6 @@ with tab1:
             if not stats: st.info("등록된 족보가 없습니다. 왼쪽에서 추가해주세요.")
             subjects = sorted(stats.keys())
             
-            # Grid Layout for Subjects (Original Rich UI)
             for i in range(0, len(subjects), 2):
                 cols = st.columns(2)
                 for j in range(2):
@@ -764,8 +744,6 @@ with tab2:
                     ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
                     
                     if not p_text.strip():
-                        # [NEW] 강의 뷰어에서도 OCR 시도 가능 (Optional)
-                        # 여기서는 일단 텍스트 없으면 캡션만 표시 (너무 느려질 수 있어서)
                         analysis_ready = False
                         with ai_tab1: st.caption("텍스트가 없는 이미지 페이지입니다.")
                     else:
@@ -788,7 +766,6 @@ with tab2:
                                 if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
                                     with st.spinner("강의 전체 방향성 분석 중..."):
                                         prmt = build_overview_prompt(p_text, target_subj)
-                                        # [FIXED] Smart Model List
                                         res, _ = generate_with_fallback(prmt, st.session_state.text_models)
                                         st.session_state.last_ai_text = res
                                         st.session_state.last_ai_sig = aisig
@@ -812,14 +789,11 @@ with tab2:
                                     if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
                                         with st.spinner("족보 기반 심층 분석 중..."):
                                             prmt = build_page_analysis_prompt(p_text, rel, target_subj)
-                                            # [FIXED] Smart Model List
                                             raw_res, _ = generate_with_fallback(prmt, st.session_state.text_models)
                                             
                                             # [IMPROVED] Robust Parsing with Regex (빈칸 문제 해결)
-                                            # 1. 마크다운 코드 블록 제거 등 전처리
                                             clean_res = re.sub(r"```.*?", "", raw_res).replace("```", "").strip()
                                             
-                                            # 2. 정규식으로 유연하게 섹션 추출 ([SECTION: KEY] ... )
                                             pattern = r"\[SECTION:\s*(\w+)\s*\](.*?)(?=\[SECTION:|$)"
                                             matches = re.findall(pattern, clean_res, re.DOTALL)
                                             
@@ -831,11 +805,10 @@ with tab2:
                                                     if u_key in parsed:
                                                         parsed[u_key] = content.strip()
                                             else:
-                                                # 파싱 실패 시 원본이라도 보여주기 위한 처리
+                                                # 파싱 실패 시 안전장치
                                                 parsed["DIRECTION"] = raw_res
                                                 parsed["TWIN_Q"] = "(자동 파싱 실패 - 상단 내용을 참고하세요)"
                                             
-                                            # 3. 모든 값이 비어있을 경우(매칭 실패) 안전장치
                                             if not any(v.strip() for v in parsed.values()):
                                                 parsed["DIRECTION"] = raw_res
 
@@ -873,7 +846,6 @@ with tab2:
                                     with st.spinner("생각 중..."):
                                         if analysis_ready:
                                             chat_prmt = build_chat_prompt(st.session_state.chat_history, p_text, rel, prompt)
-                                            # [FIXED] Smart Model List
                                             response_text, _ = generate_with_fallback(chat_prmt, st.session_state.text_models)
                                         else: response_text = "이 페이지에는 텍스트가 없어 답변하기 어렵습니다."
                                         st.markdown(response_text)
@@ -924,7 +896,6 @@ with tab3:
                         chks = chunk_transcript(target_text)[:10]
                         rels = [find_relevant_jokbo(c, sdb, top_k=3) for c in chks]
                         pmt = build_transcript_prompt(chks, rels, sub_t3)
-                        # [FIXED] Smart Model List
                         res, _ = generate_with_fallback(pmt, st.session_state.text_models)
                         st.session_state.tr_res = res
                     st.success("분석 완료!")
