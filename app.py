@@ -308,6 +308,8 @@ def get_embedding_robust(text: str, status_placeholder=None):
     # 시도할 모델 목록: 최신 모델이 안 되면 구형 모델로 자동 전환 (Fallback)
     candidate_models = ["models/text-embedding-004", "models/embedding-001"]
     
+    last_error_msg = "Unknown Error"
+
     for model_name in candidate_models:
         for attempt in range(max_retries):
             try:
@@ -326,6 +328,8 @@ def get_embedding_robust(text: str, status_placeholder=None):
             
             except Exception as e:
                 err_msg = str(e)
+                last_error_msg = err_msg # 에러 메시지 저장
+
                 # Rate Limit 에러인 경우: 대기 후 같은 모델 재시도
                 if "429" in err_msg or "Resource exhausted" in err_msg:
                     # 429 에러는 지수 백오프 + 추가 시간으로 충분히 기다림
@@ -340,7 +344,7 @@ def get_embedding_robust(text: str, status_placeholder=None):
                     # 기타 에러는 잠시 대기 후 재시도
                     time.sleep(1)
                     
-    return None, "api_error"
+    return None, f"Fail: {last_error_msg}" # 상세 에러 반환
 
 def filter_db_by_subject(subject: str, db: list[dict]):
     if not db: return []
@@ -541,10 +545,12 @@ with st.sidebar:
                     with st.spinner("구글 서버에 테스트 요청 중..."):
                         genai.configure(api_key=st.session_state.api_key)
                         # 가벼운 모델로 간단한 인사말 생성 요청
-                        model = genai.GenerativeModel('gemini-1.5-flash')
+                        # [FIXED] 하드코딩된 'gemini-1.5-flash' 대신 사용 가능한 모델을 자동 선택
+                        test_model_name = st.session_state.best_text_model if st.session_state.best_text_model else 'gemini-1.5-flash'
+                        model = genai.GenerativeModel(test_model_name)
                         response = model.generate_content("Hello, just checking connection.")
                         st.toast("✅ API 연결 정상!", icon="🟢")
-                        st.success("API 상태: **정상 (사용 가능)**")
+                        st.success(f"API 상태: **정상 (사용 모델: {test_model_name})**")
                 except Exception as e:
                     err_str = str(e)
                     if "429" in err_str or "Resource exhausted" in err_str:
@@ -639,18 +645,19 @@ with tab1:
                                         
                                         # Robust Embedding 호출 (자동 모델 전환 및 재시도 포함)
                                         # status_placeholder를 넘겨주어 모델 전환 메시지를 보여줌
-                                        emb, err_code = get_embedding_robust(p["text"], status_placeholder=st.empty())
+                                        emb, err_msg = get_embedding_robust(p["text"], status_placeholder=st.empty())
                                         
                                         if emb:
                                             p["embedding"] = emb
                                             p["subject"] = final_subj
                                             new_db.append(p)
                                             success_cnt += 1
-                                        elif err_code == "text_too_short":
+                                        elif err_msg == "text_too_short":
                                             skip_cnt += 1
                                             # log(f"ℹ️ P.{p_idx+1} 내용 부족 (건너뜀)") # 너무 시끄러우니 생략
                                         else:
-                                            log(f"❌ P.{p_idx+1} 임베딩 실패 (API/네트워크 오류)")
+                                            # [FIXED] 구체적인 에러 메시지 표시
+                                            log(f"❌ P.{p_idx+1} 임베딩 실패 ({err_msg})")
                                     
                                     log(f"✅ **{f.name}** 완료: 성공 {success_cnt}, 스킵 {skip_cnt}")
                                     
