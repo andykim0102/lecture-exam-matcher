@@ -918,3 +918,4 @@ with tab3:
                         st.text(st.session_state.transcribed_text)
             else:
                 st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">결과가 여기에 표시됩니다.</div>""", unsafe_allow_html=True)
+
