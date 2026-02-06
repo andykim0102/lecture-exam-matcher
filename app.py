@@ -809,9 +809,9 @@ with tab2:
                                         st.session_state.last_ai_sig = aisig
                                 st.markdown(st.session_state.last_ai_text)
                             else:
-                                # [FIX] 족보 매칭 여부와 상관없이 학습 가이드와 관련 문항을 독립적으로 표시
+                                # [FIX] 족보 발견 여부와 상관없이 '학습 가이드'는 항상 표시하도록 구조 변경
                                 
-                                # 1. 족보 문항 섹션 (관련성 있는 경우만 표시)
+                                # 1. 족보 문항 섹션
                                 if has_jokbo_evidence(rel):
                                     st.markdown("##### 🔥 관련 족보 문항")
                                     
@@ -851,7 +851,7 @@ with tab2:
                                                 else:
                                                     st.success("✅ 자동 파싱 성공!")
                                                     
-                                                    # [UI FIX] 명확한 Markdown 표시 (JSON 대신)
+                                                    # [UI FIX] 명확한 Markdown 표시
                                                     q_text = parsed_res.get("question", "")
                                                     a_text = parsed_res.get("answer", "")
                                                     st.markdown(f"**질문:** {q_text}")
@@ -860,15 +860,15 @@ with tab2:
                                                     st.divider()
                                                     
                                                     # Generation Step
-                                                    if st.button("✨ 변형 문제 생성하기", key=f"btn_gen_{idx}", type="primary"):
+                                                    if st.button("변형 문제 생성하기", key=f"btn_gen_{idx}"):
                                                         with st.spinner("쌍둥이 문제 생성 중..."):
                                                             twin_q = generate_twin_problem_from_parsed(parsed_res)
                                                             st.markdown("---")
                                                             st.markdown(twin_q)
                                 else:
                                     st.info("💡 이 페이지와 직접 연관된(0.7 이상) 족보 내용은 없습니다.")
-                                
-                                # 2. 페이지 학습 가이드 섹션 (항상 표시되도록 밖으로 이동)
+                                    
+                                # 2. 페이지 학습 가이드 섹션 (항상 표시)
                                 st.divider()
                                 st.markdown("##### 🧭 페이지 학습 가이드")
                                 
@@ -878,7 +878,6 @@ with tab2:
                                         prmt = build_page_analysis_prompt(p_text, rel, target_subj)
                                         raw_res, _ = generate_with_fallback(prmt, st.session_state.text_models)
                                         
-                                        # Simple parsing for the summary section
                                         parts = raw_res.split("[SECTION:")
                                         parsed_sum = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
                                         for p in parts:
