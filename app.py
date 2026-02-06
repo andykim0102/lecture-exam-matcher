@@ -1,4 +1,4 @@
-# app.py (UI: Premium Photo-Like Card / Logic: Full Features + Smart AI)
+# app.py (UI: Premium Photo-Like Card / Logic: Full Features + Smart AI & Robust Parsing)
 import time
 import re
 import random
@@ -620,12 +620,21 @@ with tab2:
                                     with st.spinner("AI 분석 중..."):
                                         prmt = build_page_analysis_prompt(p_text, rel, target_subj)
                                         raw, _ = generate_with_fallback(prmt, st.session_state.text_models)
+                                        
+                                        # [UPDATED] Robust Regex Parsing
                                         parsed = {"DIRECTION": "", "TWIN_Q": "", "EXPLANATION": ""}
-                                        parts = raw.split("[SECTION:")
-                                        for p in parts:
-                                            if "DIRECTION]" in p: parsed["DIRECTION"] = p.replace("DIRECTION]", "").strip()
-                                            elif "TWIN_Q]" in p: parsed["TWIN_Q"] = p.replace("TWIN_Q]", "").strip()
-                                            elif "EXPLANATION]" in p: parsed["EXPLANATION"] = p.replace("EXPLANATION]", "").strip()
+                                        # Match content between tags or end of string
+                                        # e.g., [SECTION: DIRECTION] content... [SECTION:
+                                        sections = re.findall(r"\[SECTION:\s*(\w+)\](.*?)(?=\[SECTION:|$)", raw, re.DOTALL)
+                                        
+                                        for key, content in sections:
+                                            if key in parsed:
+                                                parsed[key] = content.strip()
+                                        
+                                        # Fallback if parsing failed but we have raw text
+                                        if not any(parsed.values()) and raw:
+                                            parsed["EXPLANATION"] = raw # Show raw text as explanation
+                                            
                                         st.session_state.last_ai_text = parsed
                                         st.session_state.last_ai_sig = aisig
                             
@@ -661,15 +670,19 @@ with tab2:
                                     c1, c2, c3 = st.columns(3)
                                     with c1:
                                         with st.expander("📝 정답/해설"):
-                                            if i == 0 and isinstance(res_ai, dict): st.write(res_ai.get("EXPLANATION", "생성 중..."))
+                                            # Show for all top cards using shared context analysis
+                                            if isinstance(res_ai, dict): 
+                                                st.write(res_ai.get("EXPLANATION") or "생성 중...")
                                             else: st.caption("AI 해설 미제공")
                                     with c2:
                                         with st.expander("🎯 출제포인트"):
-                                            if i == 0 and isinstance(res_ai, dict): st.write(res_ai.get("DIRECTION", "생성 중..."))
+                                            if isinstance(res_ai, dict): 
+                                                st.write(res_ai.get("DIRECTION") or "생성 중...")
                                             else: st.caption("내용 없음")
                                     with c3:
                                         with st.expander("🔄 쌍둥이문제"):
-                                            if i == 0 and isinstance(res_ai, dict): st.info(res_ai.get("TWIN_Q", "생성 중..."))
+                                            if isinstance(res_ai, dict): 
+                                                st.info(res_ai.get("TWIN_Q") or "생성 중...")
                                             else: st.caption("내용 없음")
                         else:
                             st.info("관련 기출 문제가 없습니다.")
