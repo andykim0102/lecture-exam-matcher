@@ -19,108 +19,43 @@ st.set_page_config(page_title="Med-Study OS", layout="wide", page_icon="🩺")
 # Custom CSS for UI Enhancement
 st.markdown("""
 <style>
-    /* 1. Force Light Mode & Colors */
-    .stApp { background-color: #f8f9fa; } 
-    h1, h2, h3, h4, h5, h6, p, span, div, label, .stMarkdown { color: #1c1c1e !important; }
-    .gray-text, .text-sm, .login-desc, small { color: #8e8e93 !important; }
+    /* ... (기존 설정 유지) ... */
     
-    /* Button Text Colors */
-    div.stButton > button p { color: #007aff !important; }
-    div.stButton > button[kind="primary"] p { color: #ffffff !important; }
-
-    /* 2. Input Styles */
-    div[data-baseweb="input"] { background-color: #ffffff !important; border: 1px solid #d1d1d6 !important; color: #1c1c1e !important; }
-    div[data-baseweb="input"] input { color: #1c1c1e !important; }
-    
-    /* 3. Layout Adjustments */
-    .block-container { 
-        padding-top: 1rem !important; 
-        padding-bottom: 2rem !important; 
-        padding-left: 1rem !important; 
-        padding-right: 1rem !important; 
-        max-width: 100% !important;
-    }
-    header[data-testid="stHeader"] { display: none; }
-
-    /* 4. Tab Styles */
-    .stTabs [data-baseweb="tab-list"] { gap: 8px; background-color: transparent; padding: 4px; border-radius: 10px; margin-bottom: 15px; }
-    .stTabs [data-baseweb="tab"] { height: 40px; border-radius: 20px; padding: 0 20px; background-color: #ffffff; border: 1px solid #e0e0e0; font-weight: 600; color: #8e8e93 !important; flex-grow: 0; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
-    .stTabs [aria-selected="true"] { background-color: #007aff !important; color: #ffffff !important; box-shadow: 0 4px 8px rgba(0,122,255,0.2); border: none; }
-
-    /* 5. Card Containers */
-    div[data-testid="stVerticalBlockBorderWrapper"] {
-        border-radius: 20px; 
-        border: 1px solid #edf2f7; 
-        box-shadow: 0 4px 20px rgba(0,0,0,0.03); 
-        background-color: white;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        padding: 20px;
-    }
-    div[data-testid="stVerticalBlockBorderWrapper"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 10px 30px rgba(0,0,0,0.06);
-        border-color: #007aff;
-    }
-
-    /* 6. Buttons */
-    div.stButton > button { border-radius: 12px; font-weight: 600; border: none; box-shadow: none; background-color: #f2f2f7; transition: all 0.2s; height: 3rem; }
-    div.stButton > button:hover { background-color: #e5e5ea; transform: scale(0.98); }
-    div.stButton > button[kind="primary"] { background-color: #007aff; box-shadow: 0 4px 10px rgba(0,122,255,0.2); }
-    div.stButton > button[kind="primary"]:hover { background-color: #0062cc; box-shadow: 0 6px 14px rgba(0,122,255,0.3); }
-
-    /* 7. Subject Title Button */
-    div.stButton > button h2 {
-        font-size: 1.8rem !important;
-        font-weight: 800 !important;
-        margin: 0 !important;
-        padding: 5px 0 !important;
-        color: #1c1c1e !important;
-        line-height: 1.2 !important;
-    }
-
-    /* 8. Login & Misc */
-    .login-logo { font-size: 5rem; margin-bottom: 10px; animation: bounce 2s infinite; }
-    @keyframes bounce { 0%, 20%, 50%, 80%, 100% {transform: translateY(0);} 40% {transform: translateY(-20px);} 60% {transform: translateY(-10px);} }
-    .text-bold { font-weight: 700; color: #1c1c1e !important; }
-    div[data-testid="stFileUploader"] { padding: 20px; border: 2px dashed #d1d1d6; border-radius: 16px; background-color: #fafafa; }
-    
-    /* 9. Chat Messages */
-    .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
-    div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
-    
-    /* 10. Jokbo Items (Yellow Box Style) */
-    .jokbo-item {
-        background-color: #fffde7;
-        border: 1px solid #fff59d;
+    /* 10. Exam Card Style (New Clean Look) */
+    .exam-card {
+        background-color: #ffffff;
+        border: 1px solid #e5e7eb;
         border-radius: 12px;
-        padding: 16px;
-        margin-bottom: 12px;
-        box-shadow: 0 2px 6px rgba(0,0,0,0.02);
+        padding: 20px;
+        margin-bottom: 16px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        transition: transform 0.2s;
     }
-    .jokbo-source {
-        font-size: 0.8rem;
-        color: #f57f17;
-        margin-bottom: 6px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
+    .exam-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.08);
+    }
+    .exam-text {
+        font-family: 'Helvetica Neue', sans-serif;
+        font-size: 1.05rem;
+        line-height: 1.6;
+        color: #374151;
+        margin-top: 10px;
+        white-space: pre-wrap;
     }
     
-    /* 11. Sidebar Items */
-    .sidebar-subject {
-        padding: 10px 15px;
-        background-color: white;
-        border-radius: 10px;
+    /* 11. Score Badge */
+    .score-badge {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 9999px;
+        font-size: 0.85rem;
+        font-weight: 700;
         margin-bottom: 8px;
-        font-weight: 600;
-        color: #333;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        border: 1px solid #f0f0f0;
-        display: flex;
-        align-items: center;
-        gap: 8px;
     }
-    .sidebar-icon { font-size: 1.1rem; }
+    .badge-high { background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+    .badge-med { background-color: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+    .badge-low { background-color: #f3f4f6; color: #4b5563; border: 1px solid #e5e7eb; }
     
     /* 12. Hot Page Button */
     .hot-page-btn-score { font-size: 0.8em; color: #ff3b30; }
@@ -357,18 +292,17 @@ def parse_raw_jokbo_llm(raw_text):
     LLM을 사용하여 엉망인 족보 텍스트를 구조화된 JSON으로 변환
     """
     prompt = f"""
-    You are an expert exam data parser.
-    Analyze the following raw text which may contain a mix of questions, choices, answers, and explanations.
-    Structure it into a clean JSON object.
+    You are an expert medical exam parser.
+    Analyze the following text.
     
     [Raw Text]
     {raw_text}
     
     [Requirements]
-    1. Extract the 'question' (main problem text).
-    2. Extract 'choices' as a list of strings if it's a multiple choice question.
-    3. Extract 'answer' if present.
-    4. Extract 'explanation' if present.
+    1. Extract 'question', 'choices' (list), 'answer', 'explanation'.
+    2. **CRITICAL:** Even if the question is in English, the 'explanation' MUST be in KOREAN (한국어).
+    3. If there is no explanation in the text, generate a brief logic in Korean based on medical knowledge.
+    4. Return ONLY JSON.
     5. Detect 'type' ("객관식" or "주관식").
     6. Return ONLY the JSON object. Do not include markdown formatting like ```json.
     """
@@ -384,20 +318,22 @@ def parse_raw_jokbo_llm(raw_text):
 
 def generate_twin_problem_llm(parsed_data, subject):
     """
-    구조화된 데이터를 기반으로 쌍둥이 문제(변형 문제) 생성
+    쌍둥이 문제 생성 (한국어 필수)
     """
     data = parsed_data["data"]
     prompt = f"""
-    Create a 'Twin Problem' for medical students based on the following exam data.
+    Create a 'Twin Problem' for medical students.
     Subject: {subject}
     
-    [Original Problem Data]
+    [Original Data]
     {json.dumps(data, ensure_ascii=False)}
     
     [Instructions]
-    1. Create a NEW problem with the same logic, difficulty, and concept.
-    2. Change the scenario, values, or clinical case slightly so it's not identical.
-    3. Provide the correct answer and a detailed logic explanation.
+    1. Create a similar problem (same logic, different values/case).
+    2. **Output Language:** The problem text can be English or Korean (match original), but the **Explanation MUST be in KOREAN**.
+    3. Provide:
+       - **[변형 문제]**: The new question.
+       - **[정답 및 해설]**: Correct answer and detailed logic in Korean.
     
     [Output Format]
     **[변형 문제]**
@@ -988,33 +924,43 @@ with tab2:
                                     score = r['score']
                                     raw_txt = content['text']
                                     
-                                    with st.container(border=True):
-                                        st.markdown(f"**#{i+1} 유사도 {score:.2f}** <small>({content['source']} P.{content['page']})</small>", unsafe_allow_html=True)
-                                        
-                                        # Split the raw text into potential questions
-                                        split_questions = split_jokbo_text(raw_txt)
-                                        
-                                        if not split_questions:
-                                            # Fallback if no numbered questions found
-                                            split_questions = [raw_txt]
+                                    # --- [NEW] 유사도 직관화 로직 ---
+                                    if score >= 0.82:
+                                        badge_cls = "badge-high"
+                                        badge_txt = f"🔥 강력 추천 ({score:.0%})"
+                                    elif score >= 0.75:
+                                        badge_cls = "badge-med"
+                                        badge_txt = f"✨ 높은 연관 ({score:.0%})"
+                                    else:
+                                        badge_cls = "badge-low"
+                                        badge_txt = f"☁️ 참고 문제 ({score:.0%})"
+                                    
+                                    # Split questions
+                                    split_questions = split_jokbo_text(raw_txt)
+                                    if not split_questions: split_questions = [raw_txt]
 
-                                        st.caption(f"🔍 발견된 문항: {len(split_questions)}개")
+                                    for seq_idx, question_txt in enumerate(split_questions):
+                                        item_id = f"{psig}_{i}_{seq_idx}"
                                         
-                                        # Render each split question as a separate card
-                                        for seq_idx, question_txt in enumerate(split_questions):
-                                            item_id = f"{psig}_{i}_{seq_idx}" # Unique ID per segment
-                                            
-                                            st.markdown(f"""
-                                            <div class="jokbo-item">
+                                        # --- [NEW] 카드형 디자인 적용 ---
+                                        st.markdown(f"""
+                                        <div class="exam-card">
+                                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                                <span class="score-badge {badge_cls}">{badge_txt}</span>
+                                                <small style="color: #9ca3af;">{content['source']} (P.{content['page']})</small>
+                                            </div>
+                                            <div class="exam-text">
                                                 {question_txt}
                                             </div>
-                                            """, unsafe_allow_html=True)
+                                        </div>
+                                        """, unsafe_allow_html=True)
 
-                                            # [NEW] Single Button for Analysis & Generation
-                                            with st.expander(f"✨ 정답/해설 및 쌍둥이 문제", expanded=False):
-                                                # Check if already parsed/generated
+                                        # [NEW] 분석 버튼 (기존 로직과 동일하지만 UI 배치만 조정)
+                                        # 버튼을 카드 바로 아래에 붙여서 연관성 강조
+                                        col_act1, col_act2 = st.columns([1, 0.05]) # 여백 조정
+                                        with col_act1:
+                                            with st.expander(f"💡 정답/해설 및 쌍둥이 문제 보기", expanded=False):
                                                 if item_id in st.session_state.parsed_items:
-                                                    # Show Cached Results
                                                     parsed_res = st.session_state.parsed_items[item_id]
                                                     if parsed_res["success"]:
                                                         data = parsed_res["data"]
@@ -1025,21 +971,18 @@ with tab2:
                                                         </div>
                                                         """, unsafe_allow_html=True)
                                                         
-                                                        # Show Twin Problem
                                                         if item_id in st.session_state.twin_items:
                                                             st.divider()
+                                                            st.markdown("##### 🔄 변형(쌍둥이) 문제")
                                                             st.markdown(st.session_state.twin_items[item_id])
                                                     else:
                                                         st.error("분석 실패")
                                                 else:
-                                                    # One Button to Trigger All
-                                                    if st.button("🚀 AI 정답/해설 및 변형 문제 생성", key=f"btn_all_{item_id}", type="primary", use_container_width=True):
-                                                        with st.spinner("AI가 문제를 분석하고 변형 문제를 생성 중입니다..."):
-                                                            # 1. Parse
+                                                    if st.button("🚀 AI 분석 시작", key=f"btn_all_{item_id}", use_container_width=True):
+                                                        with st.spinner("한국어로 해설을 생성하고 있습니다..."):
                                                             parsed = parse_raw_jokbo_llm(question_txt)
                                                             st.session_state.parsed_items[item_id] = parsed
                                                             
-                                                            # 2. Generate Twin (if parse success)
                                                             if parsed["success"]:
                                                                 twin_res = generate_twin_problem_llm(parsed, st.session_state.t2_selected_subject)
                                                                 st.session_state.twin_items[item_id] = twin_res
@@ -1127,4 +1070,5 @@ with tab3:
                         st.text(st.session_state.transcribed_text)
             else:
                 st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">결과가 여기에 표시됩니다.</div>""", unsafe_allow_html=True)
+
 
