@@ -1,4 +1,4 @@
-# app.py (UI: Original Rich Style / Logic: Smart Model Discovery + OCR Fallback + Robust Parsing 2.0 + Hot Page Nav)
+# app.py (UI: Clean Badge Style / Logic: Auto-Generation + Strict Filtering)
 import time
 import re
 import random
@@ -88,7 +88,7 @@ st.markdown("""
     .stChatMessage { background-color: #f9f9f9; border-radius: 16px; padding: 15px; margin-bottom: 10px; border: 1px solid #f0f0f0; }
     div[data-testid="stChatMessageContent"] p { font-size: 0.95rem; line-height: 1.5; }
     
-    /* 10. Jokbo Items (Yellow Box Style) */
+    /* 10. Jokbo Items (Updated) */
     .jokbo-item {
         background-color: #fffde7;
         border: 1px solid #fff59d;
@@ -97,41 +97,25 @@ st.markdown("""
         margin-bottom: 12px;
         box-shadow: 0 2px 6px rgba(0,0,0,0.02);
     }
-    .jokbo-source {
-        font-size: 0.8rem;
-        color: #f57f17;
-        margin-bottom: 6px;
-        font-weight: 800;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-    }
     
-    /* 11. Sidebar Items */
-    .sidebar-subject {
-        padding: 10px 15px;
-        background-color: white;
-        border-radius: 10px;
-        margin-bottom: 8px;
-        font-weight: 600;
-        color: #333;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-        border: 1px solid #f0f0f0;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }
-    .sidebar-icon { font-size: 1.1rem; }
-    
-    /* 12. Hot Page Button */
-    .hot-page-btn-score { font-size: 0.8em; color: #ff3b30; }
-
-    /* 13. Answer Box */
+    /* 11. Answer Box */
     .answer-box {
         background-color: #e8f5e9;
         border-left: 4px solid #4caf50;
-        padding: 10px;
-        margin-top: 10px;
-        border-radius: 4px;
+        padding: 15px;
+        margin-top: 15px;
+        border-radius: 8px;
+        font-size: 0.95rem;
+    }
+    
+    /* 12. Twin Problem Box */
+    .twin-box {
+        background-color: #f3e5f5;
+        border-left: 4px solid #9c27b0;
+        padding: 15px;
+        margin-top: 15px;
+        border-radius: 8px;
+        font-size: 0.95rem;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -193,7 +177,7 @@ def logout():
 
 
 # ==========================================
-# 3. Helpers & Data Logic (Smart Model Update)
+# 3. Helpers & Data Logic
 # ==========================================
 def ensure_configured():
     if st.session_state.get("api_key"):
@@ -219,7 +203,7 @@ def get_best_model(models, keywords):
 
 def get_embedding_robust(text: str, status_placeholder=None):
     text = (text or "").strip()
-    if len(text) < 50: 
+    if len(text) < 30: 
         return None, "text_too_short"
         
     text = text[:10000]
@@ -235,14 +219,12 @@ def get_embedding_robust(text: str, status_placeholder=None):
         
     sorted_candidates = sorted(candidates, key=lambda x: 0 if 'text-embedding-004' in x else 1)
     
-    max_retries = 5
-    base_wait = 3
-    last_error_msg = ""
-
+    max_retries = 3
+    
     for model_name in sorted_candidates[:2]:
         for attempt in range(max_retries):
             try:
-                time.sleep(1.0) 
+                time.sleep(0.5) 
                 if "004" in model_name:
                     res = genai.embed_content(model=model_name, content=text, task_type="retrieval_document")
                 else:
@@ -250,22 +232,10 @@ def get_embedding_robust(text: str, status_placeholder=None):
                     
                 if res and "embedding" in res:
                     return res["embedding"], None
-            
-            except Exception as e:
-                err_msg = str(e)
-                last_error_msg = f"{model_name}: {err_msg}"
-                
-                if "429" in err_msg or "Resource exhausted" in err_msg:
-                    wait_time = base_wait * (2 ** attempt) + random.randint(1, 3)
-                    if status_placeholder:
-                        status_placeholder.caption(f"⚠️ 사용량 많음 ({model_name}). {wait_time}초 대기 중... ({attempt+1}/{max_retries})")
-                    time.sleep(wait_time)
-                elif "404" in err_msg or "Not Found" in err_msg:
-                    break
-                else:
-                    time.sleep(1)
+            except Exception:
+                time.sleep(1)
                     
-    return None, f"Fail: {last_error_msg}"
+    return None, "Embedding Failed"
 
 def filter_db_by_subject(subject: str, db: list[dict]):
     if not db: return []
@@ -306,19 +276,18 @@ def generate_with_fallback(prompt: str, model_names: list[str]):
         except Exception as e: 
             last_err = e
             continue
-    raise Exception(f"AI 응답 실패: {str(last_err)}")
+    return f"AI 응답 실패: {str(last_err)}", "Error"
 
 def transcribe_audio_gemini(audio_bytes, api_key):
     try:
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content([
-            "Please transcribe the following audio file into text accurately. Do not add any conversational text, just the transcription.",
+            "Please transcribe the following audio file into text accurately.",
             {"mime_type": "audio/wav", "data": audio_bytes}
         ])
         return response.text
     except Exception as e:
-        st.error(f"음성 인식 실패: {e}")
         return None
 
 def transcribe_image_to_text(image, api_key):
@@ -326,7 +295,7 @@ def transcribe_image_to_text(image, api_key):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-1.5-flash")
         response = model.generate_content([
-            "Extract all text from this image exactly as is. Just the text, no comments.",
+            "Extract all text from this image exactly as is.",
             image
         ])
         return response.text
@@ -334,28 +303,25 @@ def transcribe_image_to_text(image, api_key):
         return None
 
 # ==========================================
-# 4. New LLM Logic (Parser & Generator)
+# 4. New Logic: Relevance Badges & Parsing
 # ==========================================
 
+def get_relevance_badge(score):
+    if score >= 0.85:
+        return "🔥🔥 강력 추천 (적중 예상)", "red"
+    elif score >= 0.75:
+        return "🔥 추천 (밀접 관련)", "orange"
+    else:
+        return "✅ 참고 (관련 있음)", "green"
+
 def split_jokbo_text(text):
-    """
-    정규표현식을 사용하여 문항 번호(1. 24. 15) 등을 기준으로 텍스트를 분리합니다.
-    (예: 24. DNA... -> [24. DNA...])
-    """
     if not text: return []
-    # Pattern: Start of line or text + whitespace + Number + dot or parenthesis
-    # Uses Lookahead to split BEFORE the number, keeping the number in the resulting chunks
     pattern = r'(?:\n|^)\s*(?=\d+[\.\)])'
-    
     parts = re.split(pattern, text)
-    # Filter empty strings and strip whitespace
     questions = [p.strip() for p in parts if p.strip()]
     return questions
 
 def parse_raw_jokbo_llm(raw_text):
-    """
-    LLM을 사용하여 엉망인 족보 텍스트를 구조화된 JSON으로 변환
-    """
     prompt = f"""
     You are an expert exam data parser.
     Analyze the following raw text which may contain a mix of questions, choices, answers, and explanations.
@@ -365,17 +331,12 @@ def parse_raw_jokbo_llm(raw_text):
     {raw_text}
     
     [Requirements]
-    1. Extract the 'question' (main problem text).
-    2. Extract 'choices' as a list of strings if it's a multiple choice question.
-    3. Extract 'answer' if present.
-    4. Extract 'explanation' if present.
-    5. Detect 'type' ("객관식" or "주관식").
-    6. Return ONLY the JSON object. Do not include markdown formatting like ```json.
+    1. Extract 'question', 'choices', 'answer', 'explanation', 'type'.
+    2. Return ONLY the JSON object.
     """
     
     try:
         res_text, _ = generate_with_fallback(prompt, st.session_state.text_models)
-        # Clean up code blocks if model adds them
         clean_text = re.sub(r"```json|```", "", res_text).strip()
         parsed = json.loads(clean_text)
         return {"success": True, "data": parsed}
@@ -383,30 +344,16 @@ def parse_raw_jokbo_llm(raw_text):
         return {"success": False, "error": str(e)}
 
 def generate_twin_problem_llm(parsed_data, subject):
-    """
-    구조화된 데이터를 기반으로 쌍둥이 문제(변형 문제) 생성
-    """
     data = parsed_data["data"]
     prompt = f"""
-    Create a 'Twin Problem' for medical students based on the following exam data.
+    Create a 'Twin Problem' (Similar but different question) for medical students.
     Subject: {subject}
+    Original Question: {data.get('question')}
+    Original Answer: {data.get('answer')}
     
-    [Original Problem Data]
-    {json.dumps(data, ensure_ascii=False)}
-    
-    [Instructions]
-    1. Create a NEW problem with the same logic, difficulty, and concept.
-    2. Change the scenario, values, or clinical case slightly so it's not identical.
-    3. Provide the correct answer and a detailed logic explanation.
-    
-    [Output Format]
-    **[변형 문제]**
-    (Question Text)
-    (Choices if applicable)
-    
-    **[정답 및 해설]**
-    **정답:** (Answer)
-    **해설:** (Detailed Logic)
+    Output Format:
+    **[변형 문제]** Question...
+    **[정답 및 해설]** Answer & Logic...
     """
     
     try:
@@ -415,21 +362,7 @@ def generate_twin_problem_llm(parsed_data, subject):
     except Exception as e:
         return f"문제 생성 실패: {str(e)}"
 
-# --- Prompt Builders (Improved with Persona) ---
-def build_overview_prompt(first_page_text, subject):
-    return f"""
-    너는 의대 수석 조교다. 지금 학생이 '{subject}' 강의록의 첫 페이지(표지/목차)를 보고 있다.
-    이 강의록 전체를 공부할 때 어떤 마음가짐과 전략을 가져야 하는지, 족보(기출) 패턴을 고려하여 조언해라.
-    
-    [강의록 첫 페이지 내용]
-    {first_page_text[:1500]}
-    
-    출력 형식:
-    1. 🏁 이 강의의 핵심 목표 (한 줄)
-    2. 🚩 족보 기반 공부 전략 (3가지 포인트)
-    3. ⚠️ 주의해야 할 점
-    """
-
+# --- Prompt Builders ---
 def build_chat_prompt(history: list, context_text: str, related_jokbo: list, question: str):
     jokbo_ctx = "\n".join([f"- {r['content']['text'][:300]}" for r in related_jokbo[:3]])
     return f"""
@@ -443,7 +376,7 @@ def build_chat_prompt(history: list, context_text: str, related_jokbo: list, que
 def build_transcript_prompt(chunks: list[str], related_packs: list[list[dict]], subject: str):
     packed = ""
     for idx, (chunk, rel) in enumerate(zip(chunks, related_packs), 1):
-        if not has_jokbo_evidence(rel): continue
+        if not rel: continue
         ctx = "\n".join([f"- {r['content']['text'][:200]}" for r in rel[:2]])
         packed += f"\n(구간 {idx})\n[강의] {chunk}\n[족보근거] {ctx}\n"
     if not packed: return "족보와 관련된 내용이 없습니다."
@@ -464,26 +397,12 @@ def chunk_transcript(text: str, max_chars: int = 900):
                 chunks.append(p[i:i+max_chars])
     return chunks
 
-def format_jokbo_text(text):
-    if not text: return ""
-    formatted = re.sub(r'(?<!\d)(\d+\.)\s+', r'\n\n**\1** ', text)
-    return formatted.strip()
-
-def rename_subject(old_name, new_name):
-    count = 0
-    for item in st.session_state.db:
-        if item.get("subject") == old_name:
-            item["subject"] = new_name
-            count += 1
-    return count
-
 def get_subject_stats():
     stats = {}
     for item in st.session_state.db:
         subj = item.get("subject", "기타")
         if subj not in stats:
-            rand_min = random.randint(1, 59)
-            stats[subj] = {"count": 0, "last_updated": f"{rand_min}분 전"}
+            stats[subj] = {"count": 0, "last_updated": "방금 전"}
         stats[subj]["count"] += 1
     return stats
 
@@ -495,15 +414,11 @@ def get_subject_files(subject):
             files[src] = files.get(src, 0) + 1
     return files
 
-def has_jokbo_evidence(related: list[dict]) -> bool:
-    return bool(related) and related[0]["score"] >= 0.70
-
 
 # ==========================================
-# 4. Main App UI
+# 5. Main App UI
 # ==========================================
 
-# 로그인 체크
 if not st.session_state.logged_in:
     login()
     st.stop()
@@ -519,49 +434,26 @@ with st.sidebar:
             st.caption("본과 2학년")
         if st.button("로그아웃", use_container_width=True): logout()
 
-    # --- 내 학습 과목 리스트 ---
-    st.markdown("### 📚 내 학습 과목")
-    my_subjects = sorted({x.get("subject", "기타") for x in st.session_state.db})
-    if my_subjects:
-        for s in my_subjects:
-            st.markdown(
-                f"""
-                <div class="sidebar-subject">
-                    <span class="sidebar-icon">📘</span> {s}
-                </div>
-                """, 
-                unsafe_allow_html=True
-            )
-    else:
-        st.caption("아직 등록된 과목이 없습니다.")
-    st.divider()
-
     st.markdown("### ⚙️ 설정")
     with st.container(border=True):
         api_key_input = st.text_input("Gemini API Key", type="password", key="api_key_input")
         if api_key_input:
             st.session_state.api_key = api_key_input.strip()
             
-        if st.button("🔄 모델 목록 불러오기 (연결 테스트)", use_container_width=True):
+        if st.button("🔄 모델 목록 불러오기", use_container_width=True):
             if not st.session_state.api_key:
                 st.error("API Key를 입력하세요.")
             else:
-                with st.spinner("사용 가능한 모델 찾는 중..."):
+                with st.spinner("연결 테스트 중..."):
                     t_mods, e_mods = list_available_models(st.session_state.api_key)
-                    
                     if t_mods and e_mods:
                         st.session_state.api_key_ok = True
                         st.session_state.text_models = t_mods
                         st.session_state.embedding_models = e_mods
-                        
                         st.session_state.best_text_model = get_best_model(t_mods, ["flash", "pro"])
-                        st.session_state.best_embedding_model = get_best_model(e_mods, ["text-embedding-004", "004"])
-                        
                         st.success(f"✅ 연결 성공!")
-                        st.caption(f"텍스트 모델: {st.session_state.best_text_model}")
-                        st.caption(f"임베딩 모델: {st.session_state.best_embedding_model}")
                     else:
-                        st.error("🚫 사용 가능한 모델을 찾을 수 없습니다. (API Key 권한 확인)")
+                        st.error("🚫 연결 실패")
             
     st.markdown("### 📊 DB 현황")
     with st.container(border=True):
@@ -614,10 +506,9 @@ with tab1:
                     else:
                         prog_bar = st.progress(0)
                         
-                        with st.expander("📝 처리 로그 보기 (클릭하여 펼치기)", expanded=True):
+                        with st.expander("📝 처리 로그 보기", expanded=True):
                             log_container = st.empty()
                             logs = []
-                            
                             def log(msg):
                                 logs.append(msg)
                                 log_container.markdown("\n".join([f"- {l}" for l in logs[-5:]]))
@@ -630,62 +521,41 @@ with tab1:
                                     log(f"📂 **{f.name}** 분석 시작...")
                                     doc = fitz.open(stream=f.getvalue(), filetype="pdf")
                                     total_pages = len(doc)
-                                    success_cnt = 0
-                                    skip_cnt = 0
                                     
                                     for p_idx, page in enumerate(doc):
-                                        log_container.markdown(f"⏳ **{f.name}** 처리 중... ({p_idx + 1}/{total_pages} 페이지)")
-                                        
                                         text = page.get_text().strip()
                                         
-                                        if len(text) < 50:
+                                        if len(text) < 30:
                                             try:
                                                 pix = page.get_pixmap()
                                                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                                                 ocr_text = transcribe_image_to_text(img, st.session_state.api_key)
-                                                if ocr_text:
-                                                    text = ocr_text
-                                                    log(f"✨ P.{p_idx+1}: 이미지에서 텍스트 추출 성공!")
-                                            except Exception:
-                                                pass
+                                                if ocr_text: text = ocr_text
+                                            except Exception: pass
 
                                         emb, err_msg = get_embedding_robust(text, status_placeholder=st.empty())
                                         
                                         if emb:
-                                            p_data = {
-                                                "page": p_idx + 1,
-                                                "text": text,
-                                                "source": f.name,
-                                                "embedding": emb,
-                                                "subject": final_subj
-                                            }
-                                            new_db.append(p_data)
-                                            success_cnt += 1
-                                        elif err_msg == "text_too_short":
-                                            skip_cnt += 1
-                                            log(f"⚠️ P.{p_idx+1}: 내용 없음 (스킵)")
-                                        else:
-                                            log(f"❌ P.{p_idx+1} 임베딩 실패 ({err_msg})")
-                                    
-                                    log(f"✅ **{f.name}** 완료: 성공 {success_cnt}, 스킵 {skip_cnt}")
-                                    
+                                            new_db.append({
+                                                "page": p_idx + 1, "text": text, "source": f.name,
+                                                "embedding": emb, "subject": final_subj
+                                            })
+                                        
+                                    log(f"✅ **{f.name}** 완료")
                                 except Exception as e:
-                                    log(f"❌ 오류 발생: {str(e)}")
-                                
+                                    log(f"❌ 오류: {str(e)}")
                                 prog_bar.progress((i + 1) / total_files)
                             
                             if new_db:
                                 st.session_state.db.extend(new_db)
-                                st.success(f"🎉 총 {len(new_db)} 페이지 학습이 완료되었습니다!")
+                                st.success(f"🎉 학습 완료! (총 {len(new_db)} 페이지)")
                                 time.sleep(1.5)
                                 st.rerun()
-                            else:
-                                st.warning("저장된 데이터가 없습니다. (문서에 텍스트가 없거나 인식할 수 없습니다.)")
                         
         with col_list:
             st.markdown("#### 📚 내 학습 데이터")
             stats = get_subject_stats()
-            if not stats: st.info("등록된 족보가 없습니다. 왼쪽에서 추가해주세요.")
+            if not stats: st.info("등록된 족보가 없습니다.")
             subjects = sorted(stats.keys())
             
             for i in range(0, len(subjects), 2):
@@ -696,31 +566,12 @@ with tab1:
                         subj_data = stats[subj_name]
                         with cols[j]:
                             with st.container(border=True):
-                                c_head_1, c_head_2 = st.columns([4, 1])
-                                is_editing = (st.session_state.edit_target_subject == subj_name)
-                                with c_head_1:
-                                    if is_editing: new_name_input = st.text_input("새 이름", value=subj_name, key=f"edit_in_{subj_name}", label_visibility="collapsed")
-                                    else:
-                                        if st.button(f"## {subj_name}", key=f"btn_view_{subj_name}", help="클릭하여 파일 목록 보기"):
-                                            st.session_state.subject_detail_view = subj_name
-                                            st.rerun()
-                                with c_head_2:
-                                    if is_editing:
-                                        if st.button("💾", key=f"save_{subj_name}"):
-                                            if new_name_input and new_name_input != subj_name:
-                                                rename_subject(subj_name, new_name_input)
-                                            st.session_state.edit_target_subject = None
-                                            st.rerun()
-                                    else:
-                                        if st.button("✏️", key=f"edit_btn_{subj_name}"):
-                                            st.session_state.edit_target_subject = subj_name
-                                            st.rerun()
-                                if not is_editing:
-                                    st.markdown("---")
-                                    st.markdown(f"**⚡ 분석된 패턴:** {subj_data['count']}건")
-                                    st.markdown(f"<span class='gray-text'>🕒 {subj_data['last_updated']}</span>", unsafe_allow_html=True)
+                                if st.button(f"## {subj_name}", key=f"btn_view_{subj_name}", use_container_width=True):
+                                    st.session_state.subject_detail_view = subj_name
+                                    st.rerun()
+                                st.caption(f"{subj_data['count']} pages analyzed")
 
-# --- TAB 2: 강의 분석 (Original Rich UI + New Logic) ---
+# --- TAB 2: 강의 분석 (Clean UI + Auto Gen) ---
 with tab2:
     if st.session_state.t2_selected_subject is None:
         st.markdown("#### 📖 학습할 과목을 선택하세요")
@@ -731,15 +582,14 @@ with tab2:
              cols = st.columns(3)
              for i, subj in enumerate(subjects):
                  with cols[i % 3]:
-                     btn_label = f"## {subj}\n\n📄 {stats[subj]['count']} pages"
-                     if st.button(btn_label, key=f"t2_sel_{subj}", use_container_width=True):
+                     if st.button(f"## {subj}\n\n📄 {stats[subj]['count']} pages", key=f"t2_sel_{subj}", use_container_width=True):
                          st.session_state.t2_selected_subject = subj
                          st.rerun()
     else:
         target_subj = st.session_state.t2_selected_subject
         c_back, c_header = st.columns([1, 5])
         with c_back:
-            if st.button("← 과목 변경", key="t2_back_btn"):
+            if st.button("← 목록", key="t2_back_btn"):
                 st.session_state.t2_selected_subject = None
                 st.rerun()
         with c_header: st.markdown(f"#### 📖 {target_subj} - 실시간 강의 분석")
@@ -755,107 +605,59 @@ with tab2:
                     st.session_state.chat_history = [] 
                     st.session_state.parsed_items = {}
                     st.session_state.twin_items = {}
-                    # Hot Pages Reset
-                    st.session_state.hot_pages = []
-                    st.session_state.hot_pages_analyzed = False
+                    st.session_state.hot_pages = [] 
+                    st.rerun()
 
         if st.session_state.lecture_doc:
             doc = st.session_state.lecture_doc
             
-            # --- [NEW] Hot Page Discovery ---
+            # --- Hot Page Logic (Simplified) ---
             with st.expander("🔥 족보 적중 페이지 탐색기", expanded=not st.session_state.hot_pages_analyzed):
                 if not st.session_state.hot_pages_analyzed:
-                    st.markdown("강의록 전체를 스캔하여 족보와 연관성이 높은 **'적중 페이지'**를 찾아냅니다.")
-                    if st.button("🚀 전체 페이지 분석 시작 (AI Scan)", type="primary"):
-                        if not st.session_state.api_key_ok:
-                            st.error("설정 탭에서 API Key를 먼저 연결해주세요.")
+                    if st.button("🚀 전체 페이지 분석 시작", type="primary"):
+                        if not st.session_state.api_key_ok: st.error("API Key 필요")
                         else:
-                            # 1. Prepare DB Check
                             sub_db = filter_db_by_subject(target_subj, st.session_state.db)
-                            if not sub_db:
-                                st.warning(f"'{target_subj}' 과목의 족보 데이터가 없습니다.")
-                            else:
-                                results = []
-                                valid_db_items = [x for x in sub_db if x.get("embedding")]
-                                db_embs = [x["embedding"] for x in valid_db_items]
-                                
-                                if not db_embs:
-                                    st.warning("족보 데이터에 임베딩 정보가 없습니다.")
-                                else:
-                                    # 2. Scanning Loop
+                            if sub_db:
+                                db_embs = [x["embedding"] for x in sub_db if x.get("embedding")]
+                                if db_embs:
+                                    results = []
                                     prog_bar = st.progress(0)
-                                    status_txt = st.empty()
-                                    
-                                    total_pages = len(doc)
-                                    
-                                    for p_idx in range(total_pages):
-                                        status_txt.caption(f"Analyzing Page {p_idx+1}/{total_pages}...")
+                                    for p_idx in range(len(doc)):
                                         try:
-                                            page = doc.load_page(p_idx)
-                                            txt = page.get_text().strip()
-                                            
-                                            # Optimization: Skip empty pages, limit text length
-                                            if len(txt) > 30: 
+                                            txt = doc.load_page(p_idx).get_text().strip()
+                                            if len(txt) > 30:
                                                 emb, _ = get_embedding_robust(txt)
                                                 if emb:
-                                                    sims = cosine_similarity([emb], db_embs)[0]
-                                                    max_score = max(sims)
-                                                    
-                                                    # Threshold for "Hot Page" (INCREASED to 0.75 for better accuracy)
-                                                    if max_score >= 0.75:
-                                                        results.append({"page": p_idx, "score": max_score})
-                                        except Exception:
-                                            pass
-                                        
-                                        # Update progress
-                                        prog_bar.progress((p_idx+1)/total_pages)
-                                    
-                                    # 3. Store Results (Limit to Top 20)
-                                    sorted_results = sorted(results, key=lambda x: x["score"], reverse=True)
-                                    st.session_state.hot_pages = sorted_results[:20]
+                                                    score = max(cosine_similarity([emb], db_embs)[0])
+                                                    if score >= 0.75: results.append({"page": p_idx, "score": score})
+                                        except: pass
+                                        prog_bar.progress((p_idx+1)/len(doc))
+                                    st.session_state.hot_pages = sorted(results, key=lambda x: x["score"], reverse=True)[:20]
                                     st.session_state.hot_pages_analyzed = True
                                     st.rerun()
+                            else: st.warning("데이터 부족")
                 else:
-                    # Display Navigation
-                    c_head, c_reset = st.columns([4, 1])
-                    with c_head:
-                        if not st.session_state.hot_pages:
-                            st.info("매칭되는 적중 페이지를 찾지 못했습니다. (임계값 0.75 미만)")
-                        else:
-                            st.markdown(f"**🔥 총 {len(st.session_state.hot_pages)}개의 적중 페이지 발견!** (클릭하여 이동)")
-                    with c_reset:
-                        if st.button("재분석"):
-                            st.session_state.hot_pages_analyzed = False
-                            st.rerun()
-                    
-                    if st.session_state.hot_pages:
-                        # Grid Layout for Buttons
-                        cols = st.columns(6)
-                        for i, item in enumerate(st.session_state.hot_pages):
-                            p_num = item['page']
-                            score = item['score']
-                            with cols[i % 6]:
-                                btn_label = f"P.{p_num+1}"
-                                if st.button(btn_label, key=f"nav_{p_num}", help=f"적중률 {score:.0%}"):
-                                    st.session_state.current_page = p_num
-                                    st.session_state.last_page_sig = None
-                                    st.rerun()
-                                st.markdown(f"<div style='text-align:center; font-size:0.75rem; color:#ff3b30; margin-top:-10px;'>{score:.0%}</div>", unsafe_allow_html=True)
+                    cols = st.columns(6)
+                    for i, item in enumerate(st.session_state.hot_pages):
+                        with cols[i % 6]:
+                            if st.button(f"P.{item['page']+1}", key=f"nav_{item['page']}"):
+                                st.session_state.current_page = item['page']
+                                st.rerun()
+                            st.caption(f"{item['score']:.0%}")
             
             st.divider()
 
-            col_view, col_ai = st.columns([1.8, 1.2])
+            col_view, col_ai = st.columns([1.5, 1.5])
             
-            # --- Left: Viewer (Standard Image) ---
+            # --- Left: Viewer ---
             with col_view:
                 with st.container(border=True):
-                    # Nav Toolbar
                     c1, c2, c3 = st.columns([1, 2, 1])
                     with c1:
                         if st.button("◀", use_container_width=True):
                             if st.session_state.current_page > 0: 
                                 st.session_state.current_page -= 1
-                                st.session_state.chat_history = [] 
                                 st.rerun()
                     with c2:
                         st.markdown(f"<div style='text-align:center; font-weight:bold; padding-top:8px;'>Page {st.session_state.current_page+1} / {len(doc)}</div>", unsafe_allow_html=True)
@@ -863,197 +665,107 @@ with tab2:
                         if st.button("▶", use_container_width=True):
                             if st.session_state.current_page < len(doc)-1: 
                                 st.session_state.current_page += 1
-                                st.session_state.chat_history = []
                                 st.rerun()
                     
-                    # Prepare Image
                     page = doc.load_page(st.session_state.current_page)
                     pix = page.get_pixmap(dpi=150)
                     pil_image = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
                     p_text = page.get_text() or ""
-                    
                     st.image(pil_image, use_container_width=True)
 
-            # --- Right: AI Assistant (Clean Version) ---
+            # --- Right: AI Assistant (Badge + Auto Gen) ---
             with col_ai:
-                with st.container(border=True):
-                    ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
+                st.subheader("💡 족보 AI 분석")
+                
+                if not p_text.strip():
+                    st.info("이 페이지에는 분석할 텍스트가 없습니다.")
+                else:
+                    # 1. Similarity Search (Cache)
+                    psig = hash(p_text)
+                    if psig != st.session_state.last_page_sig:
+                        st.session_state.last_page_sig = psig
+                        sub_db = filter_db_by_subject(target_subj, st.session_state.db)
+                        # Fetch top 5, but filter strictly
+                        raw = find_relevant_jokbo(p_text, sub_db, top_k=5)
+                        # STRICT FILTER: Score >= 0.6
+                        st.session_state.last_related = [r for r in raw if r['score'] >= 0.60]
                     
-                    if not p_text.strip():
-                        analysis_ready = False
-                        with ai_tab1: st.caption("텍스트가 없는 이미지 페이지입니다.")
+                    related = st.session_state.last_related
+                    
+                    if not related:
+                        st.success("✨ 편안하게 공부하세요! 이 페이지와 관련된 기출문제가 없습니다.")
                     else:
-                        analysis_ready = True
-                        psig = hash(p_text)
-                        
-                        if psig != st.session_state.last_page_sig:
-                            st.session_state.last_page_sig = psig
-                            sub_db = filter_db_by_subject(target_subj, st.session_state.db)
-                            st.session_state.last_related = find_relevant_jokbo(p_text, sub_db)
-                            st.session_state.last_ai_sig = None
-                        
-                        rel = st.session_state.last_related
-                    
-                    with ai_tab1:
-                        if analysis_ready:
-                            if st.session_state.current_page == 0:
-                                st.markdown("##### 🏁 전체 강의 학습 전략")
-                                aisig = ("overview", target_subj, psig)
-                                if aisig != st.session_state.last_ai_sig and st.session_state.api_key_ok:
-                                    with st.spinner("강의 전체 방향성 분석 중..."):
-                                        prmt = build_overview_prompt(p_text, target_subj)
-                                        res, _ = generate_with_fallback(prmt, st.session_state.text_models)
-                                        st.session_state.last_ai_text = res
-                                        st.session_state.last_ai_sig = aisig
-                                st.markdown(st.session_state.last_ai_text)
-                            else:
-                                st.markdown(f"##### 🔥 연관 족보 TOP {len(rel[:3])}")
+                        for i, r in enumerate(related[:3]):
+                            badge_text, badge_color = get_relevance_badge(r['score'])
+                            content = r['content']
+                            raw_txt = content['text']
+                            
+                            with st.container(border=True):
+                                st.markdown(f":{badge_color}[{badge_text}]")
                                 
-                                if not rel:
-                                    st.caption("관련된 족보 내용이 없습니다.")
+                                split_q = split_jokbo_text(raw_txt)
+                                if not split_q: split_q = [raw_txt]
                                 
-                                # Loop through related items
-                                for i, r in enumerate(rel[:3]):
-                                    content = r['content']
-                                    score = r['score']
-                                    raw_txt = content['text']
+                                for seq_idx, q_txt in enumerate(split_q):
+                                    item_id = f"{psig}_{i}_{seq_idx}"
+                                    st.markdown(f"**Q.** {q_txt}")
                                     
-                                    with st.container(border=True):
-                                        st.markdown(f"**#{i+1} 유사도 {score:.2f}** <small>({content['source']} P.{content['page']})</small>", unsafe_allow_html=True)
-                                        
-                                        # Split the raw text into potential questions
-                                        split_questions = split_jokbo_text(raw_txt)
-                                        
-                                        if not split_questions:
-                                            # Fallback if no numbered questions found
-                                            split_questions = [raw_txt]
-
-                                        st.caption(f"🔍 발견된 문항: {len(split_questions)}개")
-                                        
-                                        # Render each split question as a separate card
-                                        for seq_idx, question_txt in enumerate(split_questions):
-                                            item_id = f"{psig}_{i}_{seq_idx}" # Unique ID per segment
-                                            
+                                    # [AUTO GENERATION]
+                                    if item_id not in st.session_state.parsed_items:
+                                        if st.session_state.api_key_ok:
+                                            with st.spinner("AI가 정답과 해설을 분석 중..."):
+                                                parsed = parse_raw_jokbo_llm(q_txt)
+                                                st.session_state.parsed_items[item_id] = parsed
+                                                if parsed["success"]:
+                                                    twin = generate_twin_problem_llm(parsed, target_subj)
+                                                    st.session_state.twin_items[item_id] = twin
+                                                else:
+                                                    st.session_state.twin_items[item_id] = "분석 실패"
+                                    
+                                    # Display Results
+                                    if item_id in st.session_state.parsed_items:
+                                        res = st.session_state.parsed_items[item_id]
+                                        if res["success"]:
+                                            d = res["data"]
                                             st.markdown(f"""
-                                            <div class="jokbo-item">
-                                                {question_txt}
+                                            <div class="answer-box">
+                                                <strong>✅ 정답:</strong> {d.get('answer', '정보 없음')}<br>
+                                                <strong>💡 해설:</strong> {d.get('explanation', '해설 없음')}
                                             </div>
                                             """, unsafe_allow_html=True)
+                                            
+                                            with st.expander("🔄 AI 변형 문제 (시험 대비)"):
+                                                st.markdown(f"""
+                                                <div class="twin-box">
+                                                    {st.session_state.twin_items.get(item_id, "")}
+                                                </div>
+                                                """, unsafe_allow_html=True)
 
-                                            # [NEW] Single Button for Analysis & Generation
-                                            with st.expander(f"✨ 정답/해설 및 쌍둥이 문제", expanded=False):
-                                                # Check if already parsed/generated
-                                                if item_id in st.session_state.parsed_items:
-                                                    # Show Cached Results
-                                                    parsed_res = st.session_state.parsed_items[item_id]
-                                                    if parsed_res["success"]:
-                                                        data = parsed_res["data"]
-                                                        st.markdown(f"""
-                                                        <div class="answer-box">
-                                                            <strong>✅ 정답:</strong> {data.get('answer', '정보 없음')}<br><br>
-                                                            <strong>💡 해설:</strong> {data.get('explanation', '정보 없음')}
-                                                        </div>
-                                                        """, unsafe_allow_html=True)
-                                                        
-                                                        # Show Twin Problem
-                                                        if item_id in st.session_state.twin_items:
-                                                            st.divider()
-                                                            st.markdown(st.session_state.twin_items[item_id])
-                                                    else:
-                                                        st.error("분석 실패")
-                                                else:
-                                                    # One Button to Trigger All
-                                                    if st.button("🚀 AI 정답/해설 및 변형 문제 생성", key=f"btn_all_{item_id}", type="primary", use_container_width=True):
-                                                        with st.spinner("AI가 문제를 분석하고 변형 문제를 생성 중입니다..."):
-                                                            # 1. Parse
-                                                            parsed = parse_raw_jokbo_llm(question_txt)
-                                                            st.session_state.parsed_items[item_id] = parsed
-                                                            
-                                                            # 2. Generate Twin (if parse success)
-                                                            if parsed["success"]:
-                                                                twin_res = generate_twin_problem_llm(parsed, st.session_state.t2_selected_subject)
-                                                                st.session_state.twin_items[item_id] = twin_res
-                                                                st.rerun()
-                                                            else:
-                                                                st.error("텍스트 분석에 실패했습니다.")
-                        else:
-                            st.info("분석할 텍스트가 없습니다.")
+                st.divider()
+                if prompt := st.chat_input("질문하기"):
+                    st.session_state.chat_history.append({"role": "user", "content": prompt})
+                    chat_prmt = build_chat_prompt(st.session_state.chat_history, p_text, related, prompt)
+                    res, _ = generate_with_fallback(chat_prmt, st.session_state.text_models)
+                    st.session_state.chat_history.append({"role": "assistant", "content": res})
+                    st.rerun()
 
-                    with ai_tab2:
-                        for msg in st.session_state.chat_history:
-                            with st.chat_message(msg["role"]):
-                                st.markdown(msg["content"])
-                        
-                        if prompt := st.chat_input("질문하세요 (예: 이거 시험에 나와?)"):
-                            if not st.session_state.api_key_ok: st.error("API Key 필요")
-                            else:
-                                st.session_state.chat_history.append({"role": "user", "content": prompt})
-                                with st.chat_message("user"): st.markdown(prompt)
-                                
-                                with st.chat_message("assistant"):
-                                    with st.spinner("생각 중..."):
-                                        if analysis_ready:
-                                            chat_prmt = build_chat_prompt(st.session_state.chat_history, p_text, rel, prompt)
-                                            response_text, _ = generate_with_fallback(chat_prmt, st.session_state.text_models)
-                                        else: response_text = "이 페이지에는 텍스트가 없어 답변하기 어렵습니다."
-                                        st.markdown(response_text)
-                                        st.session_state.chat_history.append({"role": "assistant", "content": response_text})
-
-        else:
-            st.markdown("""
-                <div style="height: 400px; display: flex; align-items: center; justify-content: center; color: #ccc; border: 2px dashed #eee; border-radius: 12px; margin-top: 20px;">
-                    <h3>상단에서 강의 PDF 파일을 업로드해주세요 📂</h3>
-                </div>
-            """, unsafe_allow_html=True)
-
-
-# --- TAB 3: 강의 녹음/분석 (Original Rich UI + New Logic) ---
+# --- TAB 3: 강의 녹음 ---
 with tab3:
     with st.container(border=True):
         st.markdown("#### 🎙️ 강의 녹음/분석")
-        
-        c_in, c_out = st.columns(2)
-        with c_in:
-            sub_t3 = st.selectbox("과목", ["전체"] + sorted({x.get("subject", "") for x in st.session_state.db}), key="t3_s")
-            t3_mode = st.radio("입력 방식", ["🎤 직접 녹음", "📂 파일 업로드 / 텍스트"], horizontal=True, label_visibility="collapsed")
-            target_text = ""
-            
-            if t3_mode == "🎤 직접 녹음":
-                audio_value = st.audio_input("녹음 시작")
-                if audio_value:
-                    if st.button("🚀 녹음 내용 분석하기", type="primary", use_container_width=True, key="btn_audio_analyze"):
-                        if not st.session_state.api_key_ok: st.error("API Key 필요")
-                        else:
-                            with st.spinner("음성을 텍스트로 변환 중..."):
-                                transcript = transcribe_audio_gemini(audio_value.getvalue(), st.session_state.api_key)
-                                if transcript:
-                                    st.session_state.transcribed_text = transcript
-                                    target_text = transcript
-                                else: st.error("변환 실패")
-            else:
-                f_txt = st.file_uploader("전사 파일(.txt)", type="txt", key="t3_f")
-                area_txt = st.text_area("직접 입력", height=200, placeholder="강의 내용을 입력하세요...")
-                if st.button("분석 실행", type="primary", use_container_width=True):
-                    target_text = (f_txt.getvalue().decode() if f_txt else area_txt).strip()
-            
-            if target_text:
-                if not st.session_state.api_key_ok: st.error("API Key 필요")
-                else:
-                    with st.spinner("족보 데이터와 대조하여 분석 중..."):
-                        sdb = filter_db_by_subject(sub_t3, st.session_state.db)
-                        chks = chunk_transcript(target_text)[:10]
-                        rels = [find_relevant_jokbo(c, sdb, top_k=3) for c in chks]
-                        pmt = build_transcript_prompt(chks, rels, sub_t3)
+        c1, c2 = st.columns(2)
+        with c1:
+            st.caption("녹음 기능은 데모 버전에서 텍스트 입력으로 대체될 수 있습니다.")
+            txt_in = st.text_area("강의 내용 입력 (전사 텍스트)", height=150)
+            if st.button("분석 실행", type="primary"):
+                if txt_in and st.session_state.api_key_ok:
+                    with st.spinner("분석 중..."):
+                        sdb = filter_db_by_subject(st.session_state.get("t3_s", "전체"), st.session_state.db)
+                        chks = chunk_transcript(txt_in)[:5]
+                        rels = [find_relevant_jokbo(c, sdb) for c in chks]
+                        pmt = build_transcript_prompt(chks, rels, "일반")
                         res, _ = generate_with_fallback(pmt, st.session_state.text_models)
                         st.session_state.tr_res = res
-                    st.success("분석 완료!")
-
-        with c_out:
-            st.caption("분석 결과")
+        with c2:
             if "tr_res" in st.session_state:
                 st.info(st.session_state.tr_res)
-                if st.session_state.transcribed_text:
-                    with st.expander("📝 변환된 전체 텍스트 보기"):
-                        st.text(st.session_state.transcribed_text)
-            else:
-                st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">결과가 여기에 표시됩니다.</div>""", unsafe_allow_html=True)
