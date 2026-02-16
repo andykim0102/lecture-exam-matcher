@@ -274,16 +274,15 @@ def transcribe_image_to_text(image, api_key):
 
 def split_jokbo_text(text):
     """
-    정규표현식을 사용하여 문항 번호(1. 24. 15) 등을 기준으로 텍스트를 분리합니다.
-    (예: 24. DNA... -> [24. DNA...])
+    정규표현식을 사용하여 문항 번호(1. 24. 15) 등을 기준으로 텍스트를 분리하고
+    불필요한 공백을 제거합니다.
     """
     if not text: return []
-    # Pattern: Start of line or text + whitespace + Number + dot or parenthesis
-    # Uses Lookahead to split BEFORE the number, keeping the number in the resulting chunks
+    # Pattern: 문장 시작이나 줄바꿈 뒤에 '숫자 + 점/괄호'가 오는 패턴을 찾음
     pattern = r'(?:\n|^)\s*(?=\d+[\.\)])'
     
     parts = re.split(pattern, text)
-    # Filter empty strings and strip whitespace
+    # [수정] 각 파트마다 .strip()을 호출하여 앞뒤 공백/줄바꿈을 완벽히 제거
     questions = [p.strip() for p in parts if p.strip()]
     return questions
 
@@ -919,12 +918,13 @@ with tab2:
                                     st.caption("관련된 족보 내용이 없습니다.")
                                 
                                 # Loop through related items
+# Loop through related items
                                 for i, r in enumerate(rel[:3]):
                                     content = r['content']
                                     score = r['score']
                                     raw_txt = content['text']
                                     
-                                    # --- [NEW] 유사도 직관화 로직 ---
+                                    # 유사도 뱃지 로직
                                     if score >= 0.82:
                                         badge_cls = "badge-high"
                                         badge_txt = f"🔥 강력 추천 ({score:.0%})"
@@ -935,60 +935,68 @@ with tab2:
                                         badge_cls = "badge-low"
                                         badge_txt = f"☁️ 참고 문제 ({score:.0%})"
                                     
-                                    # Split questions
+                                    # 문항 분리 및 공백 제거
                                     split_questions = split_jokbo_text(raw_txt)
                                     if not split_questions: split_questions = [raw_txt]
 
                                     for seq_idx, question_txt in enumerate(split_questions):
                                         item_id = f"{psig}_{i}_{seq_idx}"
                                         
-                                        # --- [NEW] 카드형 디자인 적용 ---
+                                        # 1. 문제 카드 출력
                                         st.markdown(f"""
                                         <div class="exam-card">
                                             <div style="display: flex; justify-content: space-between; align-items: center;">
                                                 <span class="score-badge {badge_cls}">{badge_txt}</span>
                                                 <small style="color: #9ca3af;">{content['source']} (P.{content['page']})</small>
                                             </div>
-                                            <div class="exam-text">
-                                                {question_txt}
-                                            </div>
+                                            <div class="exam-text">{question_txt}</div>
                                         </div>
                                         """, unsafe_allow_html=True)
 
-                                        # [NEW] 분석 버튼 (기존 로직과 동일하지만 UI 배치만 조정)
-                                        # 버튼을 카드 바로 아래에 붙여서 연관성 강조
-                                        col_act1, col_act2 = st.columns([1, 0.05]) # 여백 조정
-                                        with col_act1:
-                                            with st.expander(f"💡 정답/해설 및 쌍둥이 문제 보기", expanded=False):
-                                                if item_id in st.session_state.parsed_items:
-                                                    parsed_res = st.session_state.parsed_items[item_id]
-                                                    if parsed_res["success"]:
-                                                        data = parsed_res["data"]
-                                                        st.markdown(f"""
-                                                        <div class="answer-box">
-                                                            <strong>✅ 정답:</strong> {data.get('answer', '정보 없음')}<br><br>
-                                                            <strong>💡 해설:</strong> {data.get('explanation', '정보 없음')}
-                                                        </div>
-                                                        """, unsafe_allow_html=True)
-                                                        
-                                                        if item_id in st.session_state.twin_items:
-                                                            st.divider()
-                                                            st.markdown("##### 🔄 변형(쌍둥이) 문제")
-                                                            st.markdown(st.session_state.twin_items[item_id])
-                                                    else:
-                                                        st.error("분석 실패")
-                                                else:
-                                                    if st.button("🚀 AI 분석 시작", key=f"btn_all_{item_id}", use_container_width=True):
-                                                        with st.spinner("한국어로 해설을 생성하고 있습니다..."):
-                                                            parsed = parse_raw_jokbo_llm(question_txt)
-                                                            st.session_state.parsed_items[item_id] = parsed
-                                                            
-                                                            if parsed["success"]:
-                                                                twin_res = generate_twin_problem_llm(parsed, st.session_state.t2_selected_subject)
-                                                                st.session_state.twin_items[item_id] = twin_res
-                                                                st.rerun()
-                                                            else:
-                                                                st.error("텍스트 분석에 실패했습니다.")
+                                        # 2. [NEW] 자동 분석 및 탭 뷰 (버튼 제거)
+                                        # Expander를 사용하여 기본적으로는 접어두되, 열면 바로 내용이 보이게 처리
+                                        with st.expander("💡 해설 및 변형 문제 확인하기", expanded=False):
+                                            
+                                            # 데이터가 세션에 없으면 -> 즉시 분석 실행 (자동화)
+                                            if item_id not in st.session_state.parsed_items:
+                                                with st.spinner("AI가 문제를 분석하고 있습니다..."):
+                                                    parsed = parse_raw_jokbo_llm(question_txt)
+                                                    st.session_state.parsed_items[item_id] = parsed
+                                                    
+                                                    if parsed["success"]:
+                                                        twin_res = generate_twin_problem_llm(parsed, target_subj)
+                                                        st.session_state.twin_items[item_id] = twin_res
+                                            
+                                            # 분석 결과 출력 (탭 분리)
+                                            parsed_res = st.session_state.parsed_items.get(item_id)
+                                            
+                                            if parsed_res and parsed_res.get("success"):
+                                                data = parsed_res["data"]
+                                                
+                                                # [NEW] 탭으로 분리
+                                                tab_ans, tab_twin = st.tabs(["✅ 정답 & 해설", "🔄 쌍둥이(변형) 문제"])
+                                                
+                                                with tab_ans:
+                                                    # AttributeError 방지를 위한 안전한 접근
+                                                    ans_text = data.get('answer', '정보 없음')
+                                                    exp_text = data.get('explanation', '정보 없음')
+                                                    
+                                                    st.markdown(f"""
+                                                    <div class="answer-box">
+                                                        <p><strong>정답:</strong> {ans_text}</p>
+                                                        <hr style="margin: 10px 0; opacity: 0.2;">
+                                                        <p><strong>해설:</strong><br>{exp_text}</p>
+                                                    </div>
+                                                    """, unsafe_allow_html=True)
+
+                                                with tab_twin:
+                                                    twin_content = st.session_state.twin_items.get(item_id, "변형 문제 생성 실패")
+                                                    st.info(twin_content)
+                                                    
+                                            elif parsed_res and not parsed_res.get("success"):
+                                                st.error(f"분석 실패: {parsed_res.get('error')}")
+                                            else:
+                                                st.warning("일시적인 오류가 발생했습니다. 다시 시도해주세요.")
                         else:
                             st.info("분석할 텍스트가 없습니다.")
 
@@ -1070,5 +1078,6 @@ with tab3:
                         st.text(st.session_state.transcribed_text)
             else:
                 st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">결과가 여기에 표시됩니다.</div>""", unsafe_allow_html=True)
+
 
 
