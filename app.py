@@ -893,9 +893,79 @@ with tab2:
                             st.session_state.last_ai_sig = None
                         
                         rel = st.session_state.last_related
+
                     
+                    # --- Right: AI Assistant (Clean Version) ---
                     with ai_tab1:
-                        if analysis_ready:
+                        # [변경] 보기 모드 선택 토글 추가
+                        view_mode = st.radio(
+                            "보기 모드", 
+                            ["📄 현재 페이지 연관", "📚 과목 전체 문항"], 
+                            horizontal=True, 
+                            label_visibility="collapsed"
+                        )
+                        st.divider()
+
+                        if view_mode == "📚 과목 전체 문항":
+                            # [추가] 전체 문항 리스트 출력 로직
+                            st.markdown(f"##### 📚 {target_subj} 전체 문항")
+                            sub_db = filter_db_by_subject(target_subj, st.session_state.db)
+                            
+                            if not sub_db:
+                                st.info("이 과목에 등록된 족보 데이터가 없습니다.")
+                            else:
+                                all_items = []
+                                # 족보 DB에서 모든 문항 추출
+                                for page_item in sub_db:
+                                    q_chunks = split_jokbo_text(page_item['text'])
+                                    if not q_chunks: q_chunks = [page_item['text']]
+                                    for q in q_chunks:
+                                        all_items.append({
+                                            "text": q,
+                                            "source": page_item['source'],
+                                            "page": page_item['page']
+                                        })
+                                
+                                st.caption(f"총 {len(all_items)}개의 문항이 있습니다.")
+                                
+                                # 전체 리스트 "주르륵" 출력
+                                for idx, item in enumerate(all_items):
+                                    item_id = f"all_view_{idx}"
+                                    with st.container(border=True):
+                                        st.caption(f"📄 {item['source']} (P.{item['page']})")
+                                        st.markdown(f"""<div class="jokbo-item">{item['text']}</div>""", unsafe_allow_html=True)
+                                        
+                                        # AI 분석/해설 기능 (기존 로직 재사용)
+                                        with st.expander("✨ 정답/해설 및 쌍둥이 문제"):
+                                            if item_id in st.session_state.parsed_items:
+                                                parsed_res = st.session_state.parsed_items[item_id]
+                                                if parsed_res["success"]:
+                                                    data = parsed_res["data"]
+                                                    st.markdown(f"""
+                                                    <div class="answer-box">
+                                                        <strong>✅ 정답:</strong> {data.get('answer', '정보 없음')}<br><br>
+                                                        <strong>💡 해설:</strong> {data.get('explanation', '정보 없음')}
+                                                    </div>
+                                                    """, unsafe_allow_html=True)
+                                                    if item_id in st.session_state.twin_items:
+                                                        st.divider()
+                                                        st.markdown(st.session_state.twin_items[item_id])
+                                                else:
+                                                    st.error("분석 실패")
+                                            else:
+                                                if st.button("🚀 AI 분석", key=f"btn_all_{item_id}", type="primary", use_container_width=True):
+                                                     with st.spinner("분석 중..."):
+                                                         parsed = parse_raw_jokbo_llm(item['text'])
+                                                         st.session_state.parsed_items[item_id] = parsed
+                                                         if parsed["success"]:
+                                                             twin_res = generate_twin_problem_llm(parsed, target_subj)
+                                                             st.session_state.twin_items[item_id] = twin_res
+                                                             st.rerun()
+                                                         else:
+                                                             st.error("실패")
+
+                        elif analysis_ready:
+                            # [유지] 기존 '현재 페이지 연관' 로직
                             if st.session_state.current_page == 0:
                                 st.markdown("##### 🏁 전체 강의 학습 전략")
                                 aisig = ("overview", target_subj, psig)
@@ -1057,3 +1127,4 @@ with tab3:
                         st.text(st.session_state.transcribed_text)
             else:
                 st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">결과가 여기에 표시됩니다.</div>""", unsafe_allow_html=True)
+
