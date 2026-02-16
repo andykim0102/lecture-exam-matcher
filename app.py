@@ -376,17 +376,28 @@ def transcribe_image_to_text(image, api_key):
 
 def split_jokbo_text(text):
     """
-    정규표현식을 사용하여 문항 번호(1. 24. 15) 등을 기준으로 텍스트를 분리하고
-    불필요한 공백을 제거합니다.
+    정규표현식을 사용하여 문항 번호(1. 24. 15) 등을 기준으로 텍스트를 분리합니다.
+    [핵심 수정] 문항 번호로 시작하지 않는 '제목', '머리말', '불필요한 공백'은 리스트에서 제외합니다.
     """
     if not text: return []
-    # Pattern: 문장 시작이나 줄바꿈 뒤에 '숫자 + 점/괄호'가 오는 패턴을 찾음
+    
+    # 1. 문항 번호(숫자+점 혹은 괄호) 앞을 기준으로 일단 자릅니다.
+    # pattern: 줄바꿈이나 문장 시작 + 공백 + (숫자+점/괄호가 뒤에 오는지 확인)
     pattern = r'(?:\n|^)\s*(?=\d+[\.\)])'
     
     parts = re.split(pattern, text)
-    # [수정] 각 파트마다 .strip()을 호출하여 앞뒤 공백/줄바꿈을 완벽히 제거
-    questions = [p.strip() for p in parts if p.strip()]
-    return questions
+    
+    valid_questions = []
+    for p in parts:
+        p_clean = p.strip()
+        if not p_clean: continue # 빈 문자열 건너뛰기
+        
+        # [여기가 핵심] 잘라낸 덩어리가 실제로 '숫자'로 시작하는지 검사합니다.
+        # "2024 Exam..." 처럼 숫자로 시작하지 않으면 과감히 버립니다(continue).
+        if re.match(r'^\d+[\.\)]', p_clean):
+            valid_questions.append(p_clean)
+            
+    return valid_questions
 
 def parse_raw_jokbo_llm(raw_text):
     """
@@ -1003,10 +1014,20 @@ with tab2:
                                                         <strong>💡 해설:</strong> {data.get('explanation', '정보 없음')}
                                                     </div>
                                                     """, unsafe_allow_html=True)
+
+                                                    if isinstance(data, dict):
+                                                        ans_text = data.get('answer', '정보 없음')
+                                                        exp_text = data.get('explanation', '정보 없음')
+
+                                                    else:
+                                                        ans_text = "데이터 형식 오류"
+                                                        exp_text = "AI 응답을 처리하는 중 문제가 발생했습니다."
+ 
                                                     
                                                     if item_id in st.session_state.twin_items:
                                                         st.divider()
                                                         st.markdown(st.session_state.twin_items[item_id])
+                                                        
                                                 else:
                                                     st.error("분석 실패")
 
@@ -1287,6 +1308,7 @@ with tab3:
                         st.text(st.session_state.transcribed_text)
             else:
                 st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">결과가 여기에 표시됩니다.</div>""", unsafe_allow_html=True)
+
 
 
 
