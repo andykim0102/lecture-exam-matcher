@@ -911,37 +911,37 @@ with tab2:
                     
                     st.image(pil_image, use_container_width=True)
 
-            # --- Right: AI Assistant (Clean Version) ---
+# --- Right: AI Assistant (Clean Version) ---
             with col_ai:
                 with st.container(border=True):
-                            ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
-                            
-                            if not p_text.strip():
-                                analysis_ready = False
-                                with ai_tab1: st.caption("텍스트가 없는 이미지 페이지입니다.")
-                            else:
-                                analysis_ready = True
-                                psig = hash(p_text)
-                                
-                                if psig != st.session_state.last_page_sig:
-                                    st.session_state.last_page_sig = psig
-                                    sub_db = filter_db_by_subject(target_subj, st.session_state.db)
-                                    
-                                    # [변경] 고급 검색 함수 사용 (Reranking 적용)
-                                    with st.spinner("AI가 강의 내용을 분석하고 최적의 족보를 선별 중입니다..."):
-                                        st.session_state.last_related = find_relevant_jokbo_advanced(
-                                            p_text, 
-                                            sub_db, 
-                                            top_k=3, 
-                                            use_rerank=True
-                                        )
-                                    st.session_state.last_ai_sig = None
-                                
-                                rel = st.session_state.last_related
+                    ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
                     
-                    # --- Right: AI Assistant (Clean Version) ---
+                    if not p_text.strip():
+                        analysis_ready = False
+                        with ai_tab1: st.caption("텍스트가 없는 이미지 페이지입니다.")
+                    else:
+                        analysis_ready = True
+                        psig = hash(p_text)
+                        
+                        if psig != st.session_state.last_page_sig:
+                            st.session_state.last_page_sig = psig
+                            sub_db = filter_db_by_subject(target_subj, st.session_state.db)
+                            
+                            # [변경] 고급 검색 함수 사용 (Reranking 적용)
+                            with st.spinner("AI가 강의 내용을 분석하고 최적의 족보를 선별 중입니다..."):
+                                st.session_state.last_related = find_relevant_jokbo_advanced(
+                                    p_text, 
+                                    sub_db, 
+                                    top_k=3, 
+                                    use_rerank=True
+                                )
+                            st.session_state.last_ai_sig = None
+                        
+                        rel = st.session_state.last_related
+                    
+                    # 탭 1: 족보 분석 화면
                     with ai_tab1:
-                        # [변경] 보기 모드 선택 토글 추가
+                        # 보기 모드 선택 토글
                         view_mode = st.radio(
                             "보기 모드", 
                             ["📄 현재 페이지 연관", "📚 과목 전체 문항"], 
@@ -951,7 +951,7 @@ with tab2:
                         st.divider()
 
                         if view_mode == "📚 과목 전체 문항":
-                            # [추가] 전체 문항 리스트 출력 로직
+                            # 전체 문항 리스트 출력 로직
                             st.markdown(f"##### 📚 {target_subj} 전체 문항")
                             sub_db = filter_db_by_subject(target_subj, st.session_state.db)
                             
@@ -972,15 +972,27 @@ with tab2:
                                 
                                 st.caption(f"총 {len(all_items)}개의 문항이 있습니다.")
                                 
-                                # 전체 리스트 "주르륵" 출력
+                                # 전체 리스트 출력
                                 for idx, item in enumerate(all_items):
                                     item_id = f"all_view_{idx}"
                                     with st.container(border=True):
                                         st.caption(f"📄 {item['source']} (P.{item['page']})")
-                                        st.markdown(f"""<div class="jokbo-item">{item['text']}</div>""", unsafe_allow_html=True)
+                                        st.markdown(f"""<div class="exam-text" style="font-size: 0.95rem;">{item['text']}</div>""", unsafe_allow_html=True)
                                         
-                                        # AI 분석/해설 기능 (기존 로직 재사용)
+                                        # AI 분석 기능
                                         with st.expander("✨ 정답/해설 및 쌍둥이 문제"):
+                                            # 데이터가 없으면 자동 분석 시작
+                                            if item_id not in st.session_state.parsed_items:
+                                                if st.button("🚀 분석 실행", key=f"btn_all_run_{item_id}"):
+                                                     with st.spinner("분석 중..."):
+                                                         parsed = parse_raw_jokbo_llm(item['text'])
+                                                         st.session_state.parsed_items[item_id] = parsed
+                                                         if parsed["success"]:
+                                                             twin_res = generate_twin_problem_llm(parsed, target_subj)
+                                                             st.session_state.twin_items[item_id] = twin_res
+                                                             st.rerun()
+
+                                            # 결과 표시
                                             if item_id in st.session_state.parsed_items:
                                                 parsed_res = st.session_state.parsed_items[item_id]
                                                 if parsed_res["success"]:
@@ -991,25 +1003,15 @@ with tab2:
                                                         <strong>💡 해설:</strong> {data.get('explanation', '정보 없음')}
                                                     </div>
                                                     """, unsafe_allow_html=True)
+                                                    
                                                     if item_id in st.session_state.twin_items:
                                                         st.divider()
                                                         st.markdown(st.session_state.twin_items[item_id])
                                                 else:
                                                     st.error("분석 실패")
-                                            else:
-                                                if st.button("🚀 AI 분석", key=f"btn_all_{item_id}", type="primary", use_container_width=True):
-                                                     with st.spinner("분석 중..."):
-                                                         parsed = parse_raw_jokbo_llm(item['text'])
-                                                         st.session_state.parsed_items[item_id] = parsed
-                                                         if parsed["success"]:
-                                                             twin_res = generate_twin_problem_llm(parsed, target_subj)
-                                                             st.session_state.twin_items[item_id] = twin_res
-                                                             st.rerun()
-                                                         else:
-                                                             st.error("실패")
 
                         elif analysis_ready:
-                            # [유지] 기존 '현재 페이지 연관' 로직
+                            # 기존 '현재 페이지 연관' 로직
                             if st.session_state.current_page == 0:
                                 st.markdown("##### 🏁 전체 강의 학습 전략")
                                 aisig = ("overview", target_subj, psig)
@@ -1027,6 +1029,104 @@ with tab2:
                                     st.caption("관련된 족보 내용이 없습니다.")
                                 
                                 # Loop through related items
+                                for i, r in enumerate(rel[:3]):
+                                    content = r['content']
+                                    score = r['score']
+                                    raw_txt = content['text']
+                                    
+                                    # 유사도 뱃지 로직
+                                    if score >= 0.82:
+                                        badge_cls = "badge-high"
+                                        badge_txt = f"🔥 강력 추천 ({score:.0%})"
+                                    elif score >= 0.75:
+                                        badge_cls = "badge-med"
+                                        badge_txt = f"✨ 높은 연관 ({score:.0%})"
+                                    else:
+                                        badge_cls = "badge-low"
+                                        badge_txt = f"☁️ 참고 문제 ({score:.0%})"
+                                    
+                                    # 문항 분리 및 공백 제거
+                                    split_questions = split_jokbo_text(raw_txt)
+                                    if not split_questions: split_questions = [raw_txt]
+
+                                    for seq_idx, question_txt in enumerate(split_questions):
+                                        item_id = f"{psig}_{i}_{seq_idx}"
+                                        
+                                        # 1. 문제 카드 출력
+                                        st.markdown(f"""
+                                        <div class="exam-card">
+                                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                                <span class="score-badge {badge_cls}">{badge_txt}</span>
+                                                <small style="color: #9ca3af;">{content['source']} (P.{content['page']})</small>
+                                            </div>
+                                            <div class="exam-text">{question_txt}</div>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+
+                                        # 2. 자동 분석 및 탭 뷰
+                                        with st.expander("💡 해설 및 변형 문제 확인하기", expanded=False):
+                                            
+                                            # 데이터가 세션에 없으면 -> 즉시 분석 실행 (자동화)
+                                            if item_id not in st.session_state.parsed_items:
+                                                with st.spinner("AI가 문제를 분석하고 있습니다..."):
+                                                    parsed = parse_raw_jokbo_llm(question_txt)
+                                                    st.session_state.parsed_items[item_id] = parsed
+                                                    
+                                                    if parsed["success"]:
+                                                        twin_res = generate_twin_problem_llm(parsed, target_subj)
+                                                        st.session_state.twin_items[item_id] = twin_res
+                                            
+                                            # 분석 결과 출력 (탭 분리)
+                                            parsed_res = st.session_state.parsed_items.get(item_id)
+                                            
+                                            if parsed_res and parsed_res.get("success"):
+                                                data = parsed_res["data"]
+                                                
+                                                tab_ans, tab_twin = st.tabs(["✅ 정답 & 해설", "🔄 쌍둥이(변형) 문제"])
+                                                
+                                                with tab_ans:
+                                                    ans_text = data.get('answer', '정보 없음')
+                                                    exp_text = data.get('explanation', '정보 없음')
+                                                    st.markdown(f"""
+                                                    <div class="answer-box">
+                                                        <p><strong>정답:</strong> {ans_text}</p>
+                                                        <hr style="margin: 10px 0; opacity: 0.2;">
+                                                        <p><strong>해설:</strong><br>{exp_text}</p>
+                                                    </div>
+                                                    """, unsafe_allow_html=True)
+
+                                                with tab_twin:
+                                                    twin_content = st.session_state.twin_items.get(item_id, "변형 문제 생성 실패")
+                                                    st.info(twin_content)
+                                                    
+                                            elif parsed_res and not parsed_res.get("success"):
+                                                st.error(f"분석 실패: {parsed_res.get('error')}")
+                                            else:
+                                                st.warning("일시적인 오류가 발생했습니다. 다시 시도해주세요.")
+                        else:
+                            st.info("분석할 텍스트가 없습니다.")
+
+                    # 탭 2: 질의응답
+                    with ai_tab2:
+                        for msg in st.session_state.chat_history:
+                            with st.chat_message(msg["role"]):
+                                st.markdown(msg["content"])
+                        
+                        if prompt := st.chat_input("질문하세요 (예: 이거 시험에 나와?)"):
+                            if not st.session_state.api_key_ok: st.error("API Key 필요")
+                            else:
+                                st.session_state.chat_history.append({"role": "user", "content": prompt})
+                                with st.chat_message("user"): st.markdown(prompt)
+                                
+                                with st.chat_message("assistant"):
+                                    with st.spinner("생각 중..."):
+                                        if analysis_ready:
+                                            chat_prmt = build_chat_prompt(st.session_state.chat_history, p_text, rel, prompt)
+                                            response_text, _ = generate_with_fallback(chat_prmt, st.session_state.text_models)
+                                        else: response_text = "이 페이지에는 텍스트가 없어 답변하기 어렵습니다."
+                                        st.markdown(response_text)
+                                        st.session_state.chat_history.append({"role": "assistant", "content": response_text})
+
 # Loop through related items
                                 for i, r in enumerate(rel[:3]):
                                     content = r['content']
@@ -1187,6 +1287,7 @@ with tab3:
                         st.text(st.session_state.transcribed_text)
             else:
                 st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">결과가 여기에 표시됩니다.</div>""", unsafe_allow_html=True)
+
 
 
 
