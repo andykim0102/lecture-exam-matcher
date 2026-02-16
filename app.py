@@ -71,6 +71,108 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ==========================================
+# [NEW] Advanced Search Logic (Reranking & Expansion)
+# ==========================================
+
+def extract_search_keywords_llm(text):
+    """
+    [검색 증강] 강의록 텍스트에서 검색에 방해되는 노이즈를 제거하고
+    핵심 의학 키워드와 개념 위주로 요약하여 검색 정확도를 높임
+    """
+    prompt = f"""
+    You are a medical study assistant.
+    Extract the most important medical keywords, disease names, symptoms, and concepts from the following lecture note text for exam searching.
+    Return only the keywords separated by spaces.
+    
+    [Lecture Text]
+    {text[:2000]}
+    """
+    try:
+        # 키워드 추출용 가벼운 호출
+        res, _ = generate_with_fallback(prompt, st.session_state.text_models)
+        return res.strip()
+    except:
+        return text # 실패 시 원본 사용
+
+def rerank_candidates_gemini(lecture_text, candidates, top_k=3):
+    """
+    [Reranking] 1차 검색된 족보 후보들을 LLM이 직접 읽고 
+    강의 내용과 논리적으로 가장 연관된 문제만 선별 (가장 강력한 정확도 향상 도구)
+    """
+    if not candidates: return []
+    
+    # 후보군 텍스트 준비
+    candidates_prompt = ""
+    for idx, item in enumerate(candidates):
+        # 텍스트 길이 제한 (속도 최적화)
+        q_text = item['content']['text'][:400].replace("\n", " ")
+        candidates_prompt += f"[{idx}] {q_text}\n\n"
+        
+    prompt = f"""
+    You are a strict medical school professor.
+    
+    [Task]
+    Below is a specific page from a lecture note and a list of candidate exam questions.
+    Select the Top {top_k} questions that are MOST relevant to the medical concepts discussed in the lecture note.
+    Ignore questions that just share common words but ask about different concepts.
+    
+    [Lecture Note Content]
+    {lecture_text[:1500]}
+    
+    [Candidate Questions]
+    {candidates_prompt}
+    
+    [Output Format]
+    Return ONLY a JSON list of the selected indices in order of relevance.
+    Example: [3, 0, 5]
+    """
+    
+    try:
+        res, _ = generate_with_fallback(prompt, st.session_state.text_models)
+        # JSON 파싱 (숫자 리스트 추출)
+        indices = json.loads(re.search(r'\[.*\]', res).group())
+        
+        # 선택된 인덱스에 해당하는 항목만 반환 (점수 재조정: 순서대로 0.99, 0.98...)
+        reranked = []
+        for rank, idx in enumerate(indices):
+            if idx < len(candidates):
+                item = candidates[idx]
+                # LLM이 선택한 것은 신뢰도가 높으므로 점수 보정 (시각적 효과)
+                item['score'] = 0.95 - (rank * 0.05) 
+                reranked.append(item)
+        
+        return reranked if reranked else candidates[:top_k]
+        
+    except Exception as e:
+        # 에러 발생 시 원래 순서대로 반환 (Fallback)
+        return candidates[:top_k]
+
+
+def find_relevant_jokbo_advanced(query_text, db, top_k=3, use_rerank=True):
+    """
+    고급 검색 함수: (키워드 추출) -> (벡터 검색) -> (LLM 재순위화)
+    """
+    if not db: return []
+    
+    # 1. 검색 쿼리 최적화 (너무 긴 강의록은 노이즈가 됨 -> 핵심 키워드로 변환)
+    if len(query_text) > 300:
+        search_query = extract_search_keywords_llm(query_text)
+    else:
+        search_query = query_text
+        
+    # 2. 1차 벡터 검색 (후보군을 넉넉하게 10~15개 확보)
+    # Reranking을 위해 top_k의 3~4배수를 가져옵니다.
+    candidates = find_relevant_jokbo(search_query, db, top_k=10)
+    
+    if not candidates: return []
+    
+    # 3. LLM Reranking (정밀 매칭)
+    if use_rerank:
+        final_results = rerank_candidates_gemini(query_text, candidates, top_k=top_k)
+        return final_results
+    else:
+        return candidates[:top_k]
 
 # ==========================================
 # 1. Session state initialization
@@ -812,23 +914,30 @@ with tab2:
             # --- Right: AI Assistant (Clean Version) ---
             with col_ai:
                 with st.container(border=True):
-                    ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
-                    
-                    if not p_text.strip():
-                        analysis_ready = False
-                        with ai_tab1: st.caption("텍스트가 없는 이미지 페이지입니다.")
-                    else:
-                        analysis_ready = True
-                        psig = hash(p_text)
-                        
-                        if psig != st.session_state.last_page_sig:
-                            st.session_state.last_page_sig = psig
-                            sub_db = filter_db_by_subject(target_subj, st.session_state.db)
-                            st.session_state.last_related = find_relevant_jokbo(p_text, sub_db)
-                            st.session_state.last_ai_sig = None
-                        
-                        rel = st.session_state.last_related
-
+                            ai_tab1, ai_tab2 = st.tabs(["📝 족보 분석", "💬 질의응답"])
+                            
+                            if not p_text.strip():
+                                analysis_ready = False
+                                with ai_tab1: st.caption("텍스트가 없는 이미지 페이지입니다.")
+                            else:
+                                analysis_ready = True
+                                psig = hash(p_text)
+                                
+                                if psig != st.session_state.last_page_sig:
+                                    st.session_state.last_page_sig = psig
+                                    sub_db = filter_db_by_subject(target_subj, st.session_state.db)
+                                    
+                                    # [변경] 고급 검색 함수 사용 (Reranking 적용)
+                                    with st.spinner("AI가 강의 내용을 분석하고 최적의 족보를 선별 중입니다..."):
+                                        st.session_state.last_related = find_relevant_jokbo_advanced(
+                                            p_text, 
+                                            sub_db, 
+                                            top_k=3, 
+                                            use_rerank=True
+                                        )
+                                    st.session_state.last_ai_sig = None
+                                
+                                rel = st.session_state.last_related
                     
                     # --- Right: AI Assistant (Clean Version) ---
                     with ai_tab1:
@@ -1078,6 +1187,7 @@ with tab3:
                         st.text(st.session_state.transcribed_text)
             else:
                 st.markdown("""<div style="height: 300px; background: #f9f9f9; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #aaa;">결과가 여기에 표시됩니다.</div>""", unsafe_allow_html=True)
+
 
 
 
